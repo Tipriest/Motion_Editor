@@ -133,19 +133,10 @@
           <ul id="status-warnings" class="status-panel__warnings"></ul>
         </section>
         <section id="motion-controls-section" class="motion-controls" hidden>
-          <div class="motion-controls__top">
-            <p id="motion-title" class="motion-controls__title">Motion</p>
-            <span id="motion-frame-label" class="motion-controls__frame">Frame 0 / 0</span>
-          </div>
           <div class="motion-controls__actions">
             <button id="view-mode-btn" type="button" class="toggle-chip active">
               View: Root Lock
             </button>
-            <button id="motion-play-btn" type="button" class="toggle-chip">Play</button>
-            <button id="motion-reset-btn" type="button" class="toggle-chip">Reset</button>
-            <button id="prev-frame-btn" type="button" class="toggle-chip">Prev Frame</button>
-            <button id="next-frame-btn" type="button" class="toggle-chip">Next Frame</button>
-            <button id="insert-keyframe-btn" type="button" class="toggle-chip">Insert Keyframe</button>
             <button id="export-motion-btn" type="button" class="toggle-chip">Export</button>
           </div>
           <p class="motion-controls__export-info">Export supports: CSV, GMR PKL, and MimicKit PKL formats.</p>
@@ -187,24 +178,6 @@
               </div>
             </div>
           </div>
-          <div style="display: flex; align-items: center; margin-bottom: 0.25rem;">
-            <button id="prev-keyframe-btn" type="button" style="width: 16px; height: 20px; margin-right: 16px; margin-left: -8px; border: 1px solid rgba(146, 205, 236, 0.35); border-radius: 4px; background: rgba(255, 255, 255, 0.08); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center;">
-              &lt;
-            </button>
-            <div id="keyframe-markers" style="position: relative; flex: 1; height: 20px;"></div>
-            <button id="next-keyframe-btn" type="button" style="width: 16px; height: 20px; margin-left: 16px; margin-right: -8px; border: 1px solid rgba(146, 205, 236, 0.35); border-radius: 4px; background: rgba(255, 255, 255, 0.08); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center;">
-              &gt;
-            </button>
-          </div>
-          <input
-            id="motion-frame-slider"
-            class="motion-controls__slider"
-            type="range"
-            min="0"
-            max="0"
-            step="1"
-            value="0"
-          />
           <ul id="motion-warnings" class="status-panel__warnings motion-controls__warnings"></ul>
         </section>
         <section id="mode-props-panel" class="mode-props-panel" hidden>
@@ -223,6 +196,43 @@
         </div>
       </aside>
     </div>
+
+    <section id="motion-timeline-section" class="motion-timeline" aria-label="Motion timeline" hidden>
+      <div class="motion-timeline__toolbar">
+        <div class="motion-timeline__identity">
+          <p id="motion-title" class="motion-controls__title">Motion</p>
+          <span id="motion-frame-label" class="motion-controls__frame">Frame 0 / 0</span>
+        </div>
+        <div class="motion-timeline__transport" aria-label="Playback controls">
+          <button id="motion-reset-btn" type="button" class="toggle-chip">Reset</button>
+          <button id="prev-frame-btn" type="button" class="toggle-chip">Prev Frame</button>
+          <button id="motion-play-btn" type="button" class="toggle-chip motion-timeline__play">Play</button>
+          <button id="next-frame-btn" type="button" class="toggle-chip">Next Frame</button>
+          <button id="insert-keyframe-btn" type="button" class="toggle-chip">Insert Keyframe</button>
+        </div>
+      </div>
+      <div class="motion-timeline__track-row">
+        <button id="prev-keyframe-btn" type="button" class="motion-timeline__keyframe-nav" aria-label="Previous keyframe">
+          &lt;
+        </button>
+        <div class="motion-timeline__track">
+          <div id="keyframe-markers" class="motion-timeline__markers"></div>
+          <input
+            id="motion-frame-slider"
+            class="motion-controls__slider"
+            type="range"
+            min="0"
+            max="0"
+            step="1"
+            value="0"
+            aria-label="Motion frame"
+          />
+        </div>
+        <button id="next-keyframe-btn" type="button" class="motion-timeline__keyframe-nav" aria-label="Next keyframe">
+          &gt;
+        </button>
+      </div>
+    </section>
 
     <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
     <input

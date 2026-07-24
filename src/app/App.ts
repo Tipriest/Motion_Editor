@@ -845,6 +845,7 @@ export class AppController {
   private readonly modePropsPanel: HTMLElement;
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
+  private readonly motionTimelineSection: HTMLElement;
   private readonly motionPlayButton: HTMLButtonElement;
   private readonly motionResetButton: HTMLButtonElement;
   private readonly motionFpsControl: HTMLDivElement;
@@ -1254,6 +1255,7 @@ export class AppController {
     this.modePropsPanel = requireElement<HTMLElement>('mode-props-panel');
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
+    this.motionTimelineSection = requireElement<HTMLElement>('motion-timeline-section');
     this.motionPlayButton = requireElement<HTMLButtonElement>('motion-play-btn');
     this.motionResetButton = requireElement<HTMLButtonElement>('motion-reset-btn');
     this.motionFpsControl = requireElement<HTMLDivElement>('motion-fps-control');
@@ -3884,7 +3886,9 @@ export class AppController {
 
   private syncMotionControls(): void {
     const hasMotion = this.hasAnyMotion();
+    this.appRoot.dataset.hasMotion = hasMotion ? 'true' : 'false';
     this.motionControlsSection.hidden = !hasMotion;
+    this.motionTimelineSection.hidden = !hasMotion;
     this.motionPlayButton.disabled = !hasMotion;
     this.motionResetButton.disabled = !hasMotion;
     this.prevFrameButton.disabled = !hasMotion;
@@ -4536,20 +4540,22 @@ export class AppController {
     
     this.keyframes.forEach(frameIndex => {
       const marker = document.createElement('div');
+      marker.className = 'motion-timeline__keyframe-marker';
       marker.style.position = 'absolute';
-      marker.style.top = '0';
+      marker.style.bottom = '0';
       
       // 计算精确的位置，确保与进度条滑块对齐
       const maxFrame = Math.max(frameCount - 1, 0);
       const positionPercentage = maxFrame > 0 ? (frameIndex / maxFrame) * 100 : 0;
       marker.style.left = `${positionPercentage}%`;
       marker.style.transform = 'translateX(-50%)';
-      marker.style.width = '4px';
-      marker.style.height = '100%';
-      marker.style.backgroundColor = '#53bf9d';
-      marker.style.borderRadius = '2px';
-      marker.style.cursor = 'pointer';
-      marker.title = `Keyframe at frame ${frameIndex}`;
+      marker.title = `Keyframe at frame ${frameIndex + 1}`;
+
+      const frameLabel = document.createElement('span');
+      frameLabel.className = 'motion-timeline__keyframe-label';
+      frameLabel.textContent = String(frameIndex + 1);
+      marker.appendChild(frameLabel);
+
       marker.addEventListener('click', () => {
         this.motionPlayer.seek(frameIndex);
       });
@@ -4576,8 +4582,169 @@ export class AppController {
       return;
     }
 
-    this.exportMotionClip(clip);
+    this.showExportRangeDialog(clip);
   };
+
+  private showExportRangeDialog(clip: MotionClip): void {
+    const existingDialog = document.getElementById('export-range-dialog');
+    const existingOverlay = document.getElementById('export-range-overlay');
+    existingDialog?.remove();
+    existingOverlay?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'export-range-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.background = 'rgba(0, 0, 0, 0.5)';
+    overlay.style.zIndex = '999';
+
+    const dialog = document.createElement('div');
+    dialog.id = 'export-range-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'export-range-title');
+    dialog.style.position = 'fixed';
+    dialog.style.top = '50%';
+    dialog.style.left = '50%';
+    dialog.style.transform = 'translate(-50%, -50%)';
+    dialog.style.background = 'rgba(6, 12, 17, 0.95)';
+    dialog.style.border = '1px solid rgba(146, 205, 236, 0.35)';
+    dialog.style.borderRadius = '16px';
+    dialog.style.padding = '2rem';
+    dialog.style.zIndex = '1000';
+    dialog.style.minWidth = '320px';
+    dialog.style.boxShadow = '0 25px 45px rgba(1, 7, 10, 0.45)';
+    dialog.style.backdropFilter = 'blur(8px) saturate(120%)';
+
+    const title = document.createElement('h3');
+    title.id = 'export-range-title';
+    title.textContent = 'Export Frame Range';
+    title.style.color = 'var(--text-main)';
+    title.style.margin = '0 0 0.5rem';
+    dialog.appendChild(title);
+
+    const description = document.createElement('p');
+    description.textContent = `Choose an inclusive range from 1 to ${clip.frameCount}.`;
+    description.style.color = 'var(--text-muted)';
+    description.style.fontSize = '0.8rem';
+    description.style.margin = '0 0 1rem';
+    dialog.appendChild(description);
+
+    const form = document.createElement('form');
+    form.style.display = 'grid';
+    form.style.gap = '1rem';
+
+    const rangeFields = document.createElement('div');
+    rangeFields.style.display = 'grid';
+    rangeFields.style.gridTemplateColumns = '1fr 1fr';
+    rangeFields.style.gap = '0.75rem';
+
+    const createFrameInput = (labelText: string, value: number): HTMLInputElement => {
+      const field = document.createElement('label');
+      field.textContent = labelText;
+      field.style.display = 'grid';
+      field.style.gap = '0.35rem';
+      field.style.color = 'var(--text-muted)';
+      field.style.fontSize = '0.8rem';
+
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '1';
+      input.max = String(clip.frameCount);
+      input.step = '1';
+      input.required = true;
+      input.value = String(value);
+      input.style.width = '100%';
+      input.style.boxSizing = 'border-box';
+      input.style.padding = '0.5rem';
+      input.style.border = '1px solid rgba(146, 205, 236, 0.35)';
+      input.style.borderRadius = '8px';
+      input.style.background = 'rgba(7, 22, 32, 0.8)';
+      input.style.color = 'var(--text-main)';
+      input.style.font = 'inherit';
+      field.appendChild(input);
+      rangeFields.appendChild(field);
+      return input;
+    };
+
+    const startInput = createFrameInput('Start Frame', 1);
+    const endInput = createFrameInput('End Frame', clip.frameCount);
+    form.appendChild(rangeFields);
+
+    const errorText = document.createElement('p');
+    errorText.setAttribute('role', 'alert');
+    errorText.style.display = 'none';
+    errorText.style.margin = '0';
+    errorText.style.color = '#ff9a9a';
+    errorText.style.fontSize = '0.78rem';
+    form.appendChild(errorText);
+
+    const buttons = document.createElement('div');
+    buttons.style.display = 'flex';
+    buttons.style.gap = '0.5rem';
+    buttons.style.justifyContent = 'flex-end';
+
+    const closeDialog = (): void => {
+      document.removeEventListener('keydown', onKeyDown);
+      dialog.remove();
+      overlay.remove();
+    };
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeDialog();
+      }
+    };
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.className = 'toggle-chip ghost';
+    cancelButton.addEventListener('click', closeDialog);
+    buttons.appendChild(cancelButton);
+
+    const exportButton = document.createElement('button');
+    exportButton.type = 'submit';
+    exportButton.textContent = 'Export';
+    exportButton.className = 'toggle-chip';
+    buttons.appendChild(exportButton);
+    form.appendChild(buttons);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const startFrame = Number(startInput.value);
+      const endFrame = Number(endInput.value);
+      const isValidRange =
+        Number.isInteger(startFrame) &&
+        Number.isInteger(endFrame) &&
+        startFrame >= 1 &&
+        endFrame <= clip.frameCount &&
+        startFrame <= endFrame;
+
+      if (!isValidRange) {
+        errorText.textContent = `Enter whole-number frames between 1 and ${clip.frameCount}, with start no later than end.`;
+        errorText.style.display = 'block';
+        return;
+      }
+
+      const startOffset = (startFrame - 1) * clip.stride;
+      const endOffset = endFrame * clip.stride;
+      const rangedClip: MotionClip = {
+        ...clip,
+        frameCount: endFrame - startFrame + 1,
+        data: clip.data.slice(startOffset, endOffset),
+      };
+      closeDialog();
+      this.exportMotionClip(rangedClip);
+    });
+
+    overlay.addEventListener('click', closeDialog);
+    dialog.appendChild(form);
+    document.addEventListener('keydown', onKeyDown);
+    document.body.append(overlay, dialog);
+    startInput.focus();
+    startInput.select();
+  }
 
   private getRobotHeight(): number {
     console.log('getRobotHeight called');
@@ -4640,7 +4807,7 @@ export class AppController {
     }
   }
 
-  private exportMotionClip(clip: any): void {
+  private exportMotionClip(clip: MotionClip): void {
     let content: string;
     let fileName: string;
     let mimeType: string;
