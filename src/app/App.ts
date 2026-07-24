@@ -21,6 +21,7 @@ import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import { exportUfoReferenceNpz } from '../io/motion/UfoReferenceNpzService';
+import { UfoReferenceMotionService } from '../io/motion/UfoReferenceMotionService';
 import { exportUfoTrainingPkl } from '../io/motion/UfoTrainingPklService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
@@ -106,11 +107,11 @@ interface ViewerPresetManifest {
   capturedObjects: PresetAssetFile[];
 }
 
-type UrdfMotionKind = 'csv' | 'mimickit' | 'gmr';
+type UrdfMotionKind = 'csv' | 'mimickit' | 'gmr' | 'ufo-reference';
 type ViewerMotionKind = UrdfMotionKind | 'bvh' | 'smpl';
 
 function isUrdfMotionKind(kind: ViewerMotionKind | null): kind is UrdfMotionKind {
-  return kind === 'csv' || kind === 'mimickit' || kind === 'gmr';
+  return kind === 'csv' || kind === 'mimickit' || kind === 'gmr' || kind === 'ufo-reference';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -881,6 +882,7 @@ export class AppController {
   private readonly csvMotionService: CsvMotionService;
   private readonly mimicKitMotionService: MimicKitMotionService;
   private readonly gmrMotionService: GmrMotionService;
+  private readonly ufoReferenceMotionService: UfoReferenceMotionService;
   private readonly bvhMotionService: BvhMotionService;
   private readonly smplMotionService: SmplMotionService;
   private readonly objLoadService: ObjLoadService;
@@ -1369,6 +1371,7 @@ export class AppController {
     this.csvMotionService = new CsvMotionService();
     this.mimicKitMotionService = new MimicKitMotionService();
     this.gmrMotionService = new GmrMotionService();
+    this.ufoReferenceMotionService = new UfoReferenceMotionService();
     this.bvhMotionService = new BvhMotionService();
     this.smplMotionService = new SmplMotionService();
     this.objLoadService = new ObjLoadService();
@@ -1607,6 +1610,42 @@ export class AppController {
     const bvhPaths = this.bvhMotionService.getAvailableBvhPaths(fileMap);
     if (bvhPaths.length > 0) {
       await this.loadBvhMotionFromDroppedFiles(fileMap);
+      return;
+    }
+
+    const ufoReferencePaths = await this.ufoReferenceMotionService.findCompatiblePaths(fileMap, 1);
+    if (ufoReferencePaths.length > 0) {
+      const loadedRobotResult = this.lastLoadResult;
+      if (!loadedRobotResult) {
+        this.showRecoverableDropError(
+          'URDF Required For UFO Reference',
+          'Load the Tiangong3 URDF first, then drop a UFO reference NPZ.',
+          'UFO reference motion playback requires an active URDF robot.',
+        );
+        return;
+      }
+      try {
+        this.setState('loading', {
+          detail: 'Loading UFO reference motion NPZ ...',
+        });
+        const result = await this.ufoReferenceMotionService.loadFromDroppedFiles(
+          fileMap,
+          ufoReferencePaths[0],
+        );
+        this.applyLoadedUrdfMotion(
+          loadedRobotResult,
+          result.clip,
+          'ufo-reference',
+          result.selectedMotionPath,
+          result.warnings,
+        );
+      } catch (error) {
+        this.showRecoverableDropError(
+          'UFO Reference Load Failed',
+          error instanceof Error ? error.message : String(error),
+          'Check that the NPZ contains fps, joint_pos, body_pos_w, and body_quat_w.',
+        );
+      }
       return;
     }
 
@@ -3902,9 +3941,16 @@ export class AppController {
         : null;
     }
 
-    if (this.currentMotionKind === 'mimickit') {
+    if (
+      this.currentMotionKind === 'mimickit' ||
+      this.currentMotionKind === 'gmr' ||
+      this.currentMotionKind === 'ufo-reference'
+    ) {
       return this.currentMotionSourcePath
-        ? this.formatAssetFileLabel(this.currentMotionSourcePath, 'motion.pkl')
+        ? this.formatAssetFileLabel(
+            this.currentMotionSourcePath,
+            this.currentMotionKind === 'ufo-reference' ? 'motion.npz' : 'motion.pkl',
+          )
         : null;
     }
 
@@ -4887,13 +4933,16 @@ export class AppController {
     formatSelect.style.font = 'inherit';
 
     const sourceFormatOption = document.createElement('option');
-    sourceFormatOption.value = 'source';
+    sourceFormatOption.value =
+      this.currentMotionKind === 'ufo-reference' ? 'ufo-npz' : 'source';
     sourceFormatOption.textContent =
       this.currentMotionKind === 'csv'
         ? 'CSV'
         : this.currentMotionKind === 'mimickit'
           ? 'MimicKit PKL'
-          : 'GMR PKL';
+          : this.currentMotionKind === 'ufo-reference'
+            ? 'UFO Reference NPZ (xmigcs)'
+            : 'GMR PKL';
     formatSelect.appendChild(sourceFormatOption);
 
     const isTiangong3 =
@@ -4905,10 +4954,12 @@ export class AppController {
       ufoPklOption.textContent = 'UFO Training PKL (MotionLib)';
       formatSelect.appendChild(ufoPklOption);
 
-      const ufoNpzOption = document.createElement('option');
-      ufoNpzOption.value = 'ufo-npz';
-      ufoNpzOption.textContent = 'UFO Reference NPZ (xmigcs)';
-      formatSelect.appendChild(ufoNpzOption);
+      if (this.currentMotionKind !== 'ufo-reference') {
+        const ufoNpzOption = document.createElement('option');
+        ufoNpzOption.value = 'ufo-npz';
+        ufoNpzOption.textContent = 'UFO Reference NPZ (xmigcs)';
+        formatSelect.appendChild(ufoNpzOption);
+      }
     }
     formatField.appendChild(formatSelect);
     settingsPanel.appendChild(formatField);

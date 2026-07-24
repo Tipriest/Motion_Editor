@@ -34,6 +34,7 @@
 - Motion 面板：
   - `FPS` 输入框：调整 CSV 播放速度
   - `BVH Unit` 下拉框：切换 BVH 单位（`m`、`dm`、`cm`、`inch`、`feet`）
+- **UFO Reference NPZ 输入**：加载 Tiangong3 URDF 后，可拖入 30-body Tiangong3 或 39-body DEX EVT NPZ；应用会读取 pelvis 根姿态和 29 个关节并直接播放。
 
 ### 动作数据调整
 - **创建动作**：如果没有动作文件，点击数据集面板中的 "Create Motion" 按钮创建新的动作文件。
