@@ -16,6 +16,7 @@ import {
 import { CsvMotionService } from '../io/motion/CsvMotionService';
 import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
+import { resampleMotionClip } from '../io/motion/MotionClipResampling';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
@@ -4706,6 +4707,38 @@ export class AppController {
     const endInput = createFrameInput('End Frame', clip.frameCount);
     form.appendChild(rangeFields);
 
+    const fpsField = document.createElement('label');
+    fpsField.textContent = 'Export Frame Rate';
+    fpsField.style.display = 'grid';
+    fpsField.style.gap = '0.35rem';
+    fpsField.style.color = 'var(--text-muted)';
+    fpsField.style.fontSize = '0.8rem';
+
+    const fpsSelect = document.createElement('select');
+    fpsSelect.style.width = '100%';
+    fpsSelect.style.boxSizing = 'border-box';
+    fpsSelect.style.padding = '0.5rem';
+    fpsSelect.style.border = '1px solid rgba(146, 205, 236, 0.35)';
+    fpsSelect.style.borderRadius = '8px';
+    fpsSelect.style.background = 'rgba(7, 22, 32, 0.8)';
+    fpsSelect.style.color = 'var(--text-main)';
+    fpsSelect.style.font = 'inherit';
+
+    const originalFpsOption = document.createElement('option');
+    originalFpsOption.value = 'original';
+    originalFpsOption.textContent = `Original (${clip.fps} Hz)`;
+    fpsSelect.appendChild(originalFpsOption);
+
+    for (const fps of [24, 30, 50, 60, 100, 120]) {
+      const option = document.createElement('option');
+      option.value = String(fps);
+      option.textContent = `${fps} Hz`;
+      option.selected = fps === 50;
+      fpsSelect.appendChild(option);
+    }
+    fpsField.appendChild(fpsSelect);
+    form.appendChild(fpsField);
+
     const errorText = document.createElement('p');
     errorText.setAttribute('role', 'alert');
     errorText.style.display = 'none';
@@ -4769,8 +4802,10 @@ export class AppController {
         frameCount: endFrame - startFrame + 1,
         data: clip.data.slice(startOffset, endOffset),
       };
+      const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
+      const exportClip = resampleMotionClip(rangedClip, selectedFps);
       closeDialog();
-      this.exportMotionClip(rangedClip);
+      this.exportMotionClip(exportClip);
     });
 
     overlay.addEventListener('click', closeDialog);
