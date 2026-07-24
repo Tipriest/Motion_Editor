@@ -4,6 +4,18 @@
   ],
   "presets": [
     {
+      "id": "evt2-boxing-default",
+      "label": "EVT2 + Boxing 120Hz",
+      "description": "Default EVT2 31-DOF robot with the 251021 boxing GMR motion.",
+      "model": {
+        "urdfPath": "assets/robots/EVT2/urdf/tiangong2dex_31dof.urdf"
+      },
+      "motion": {
+        "kind": "gmr",
+        "path": "assets/motions/251021_04_boxing_120Hz_cm_3DsMax.pkl"
+      }
+    },
+    {
       "id": "lafan1-bvh-dance1",
       "label": "LAFAN1 BVH dance1_subject1",
       "description": "Pure BVH preview mode without URDF.",

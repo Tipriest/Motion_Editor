@@ -538,6 +538,7 @@ interface SelectableMotionOption {
 }
 
 const BVH_PREVIEW_MODEL_KEY = 'builtin:bvh-preview';
+const DEFAULT_STARTUP_PRESET_ID = 'evt2-boxing-default';
 
 function buildPresetAssetFileFromPath(path: string): PresetAssetFile {
   return {
@@ -571,6 +572,9 @@ function inferUrdfBindingTag(path: string): string | null {
   }
   if (normalized.includes('/h1/') || normalized.includes('h1_description')) {
     return 'urdf:h1';
+  }
+  if (normalized.includes('/evt2/') || normalized.includes('tiangong2dex')) {
+    return 'urdf:evt2';
   }
 
   return null;
@@ -618,6 +622,9 @@ function formatSelectableModelLabel(kind: SelectableModelKind, path: string): st
   }
   if (bindingTag === 'urdf:h1_2') {
     return 'URDF · H1-2';
+  }
+  if (bindingTag === 'urdf:evt2') {
+    return 'URDF · EVT2';
   }
 
   return `URDF · ${getBaseName(path) || path}`;
@@ -2582,7 +2589,12 @@ export class AppController {
       return motionOption.bindingTags.includes(modelOption.bindingTag);
     }
 
-    if ((motionOption.kind !== 'csv' && motionOption.kind !== 'mimickit') || !modelOption.bindingTag) {
+    if (
+      (motionOption.kind !== 'csv' &&
+        motionOption.kind !== 'mimickit' &&
+        motionOption.kind !== 'gmr') ||
+      !modelOption.bindingTag
+    ) {
       return false;
     }
 
@@ -2745,6 +2757,8 @@ export class AppController {
         await this.loadMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else if (motionOption.kind === 'mimickit') {
         await this.loadMimicKitMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
+      } else if (motionOption.kind === 'gmr') {
+        await this.loadGmrMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else if (motionOption.kind === 'bvh') {
         await this.loadBvhMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else {
@@ -4094,6 +4108,11 @@ export class AppController {
     this.renderSmplModelList();
     this.renderObjOptions();
     this.syncPresetControls();
+
+    // Load the bundled startup scene unless the user selected content while the manifest was loading.
+    if (!this.lastLoadResult && !this.currentMotionKind) {
+      await this.loadPresetById(DEFAULT_STARTUP_PRESET_ID);
+    }
   }
 
   private getPresetById(presetId: string): ViewerPresetDefinition | null {
@@ -4350,6 +4369,16 @@ export class AppController {
             !motionFileMap.has(this.currentMotionSourcePath)
           ) {
             throw new Error(`Failed to load MimicKit motion for preset "${preset.label}".`);
+          }
+        } else if (preset.motion.kind === 'gmr') {
+          await this.loadGmrMotionFromDroppedFiles(motionFileMap, preferredMotionPath);
+
+          if (
+            this.currentMotionKind !== 'gmr' ||
+            !this.currentMotionSourcePath ||
+            !motionFileMap.has(this.currentMotionSourcePath)
+          ) {
+            throw new Error(`Failed to load GMR motion for preset "${preset.label}".`);
           }
         } else {
           await this.loadBvhMotionFromDroppedFiles(motionFileMap, preferredMotionPath);
