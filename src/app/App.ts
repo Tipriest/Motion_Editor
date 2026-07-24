@@ -28,7 +28,7 @@ import {
 import { UfoReferenceMotionService } from '../io/motion/UfoReferenceMotionService';
 import {
   exportUfoTrainingPkl,
-  exportUfoTrainingPklBatch,
+  exportUfoTrainingPklBatchPartsAsync,
 } from '../io/motion/UfoTrainingPklService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
@@ -1070,6 +1070,7 @@ export class AppController {
   private importedMotionBrowserAssets: MotionBrowserAsset[] = [];
   private motionBrowserSelectedIds = new Set<string>();
   private motionBrowserInspections = new Map<string, MotionBrowserInspection>();
+  private motionBrowserBatchExportProgress: { completed: number; total: number } | null = null;
   private selectedModelOptionKey: string | null = null;
   private selectedMotionOptionKey: string | null = null;
   private selectedCapturedObjPath: string | null = null;
@@ -4993,34 +4994,80 @@ export class AppController {
     let batchFps = 50;
     let batchSpeed = 1;
     const expandedTreePaths = new Set<string>();
+    const inspectionQueue: MotionBrowserAsset[] = [];
+    const queuedInspectionIds = new Set<string>();
+    let isInspectingQueue = false;
+    let inspectionCompleted = 0;
+    let inspectionTotal = 0;
 
-    const inspectSelection = async (asset: MotionBrowserAsset): Promise<void> => {
-      if (this.motionBrowserInspections.has(asset.id)) {
+    const processInspectionQueue = async (): Promise<void> => {
+      if (isInspectingQueue) {
         return;
       }
-      this.motionBrowserInspections.set(asset.id, {
-        status: 'loading',
-        format: 'Unsupported',
-        clip: null,
-        compatible: false,
-        reason: 'Inspecting motion…',
-      });
-      renderSelection();
-      const inspection = await this.inspectMotionBrowserAsset(asset);
-      this.motionBrowserInspections.set(asset.id, inspection);
-      if (!isClosed) {
+      isInspectingQueue = true;
+      while (!isClosed && inspectionQueue.length > 0) {
+        const asset = inspectionQueue.shift();
+        if (!asset) {
+          break;
+        }
+        queuedInspectionIds.delete(asset.id);
+        if (!this.motionBrowserSelectedIds.has(asset.id)) {
+          this.motionBrowserInspections.delete(asset.id);
+        } else {
+          const inspection = await this.inspectMotionBrowserAsset(asset);
+          if (isClosed) {
+            break;
+          }
+          this.motionBrowserInspections.set(asset.id, inspection);
+        }
+        inspectionCompleted += 1;
         renderSelection();
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
+      isInspectingQueue = false;
+      if (isClosed) {
+        inspectionQueue.length = 0;
+        queuedInspectionIds.clear();
+      }
+    };
+
+    const queueInspections = (assets: readonly MotionBrowserAsset[]): void => {
+      const nextAssets = assets.filter(
+        (asset) =>
+          !this.motionBrowserInspections.has(asset.id) && !queuedInspectionIds.has(asset.id),
+      );
+      if (nextAssets.length === 0) {
+        return;
+      }
+      if (!isInspectingQueue && inspectionQueue.length === 0) {
+        inspectionCompleted = 0;
+        inspectionTotal = 0;
+      }
+      for (const asset of nextAssets) {
+        queuedInspectionIds.add(asset.id);
+        inspectionQueue.push(asset);
+        inspectionTotal += 1;
+        this.motionBrowserInspections.set(asset.id, {
+          status: 'loading',
+          format: 'Unsupported',
+          clip: null,
+          compatible: false,
+          reason: 'Queued for inspection…',
+        });
+      }
+      void processInspectionQueue();
     };
 
     const toggleAssets = (assets: MotionBrowserAsset[], checked: boolean): void => {
       for (const asset of assets) {
         if (checked) {
           this.motionBrowserSelectedIds.add(asset.id);
-          void inspectSelection(asset);
         } else {
           this.motionBrowserSelectedIds.delete(asset.id);
         }
+      }
+      if (checked) {
+        queueInspections(assets);
       }
       renderTree();
       renderSelection();
@@ -5119,9 +5166,26 @@ export class AppController {
       selectionPanel.innerHTML = '';
       const assets = this.getMotionBrowserAssets();
       const selected = assets.filter((asset) => this.motionBrowserSelectedIds.has(asset.id));
+      const selectionHeader = document.createElement('div');
+      selectionHeader.className = 'motion-browser__selection-header';
       const headingElement = document.createElement('h3');
       headingElement.textContent = `Selected motions (${selected.length})`;
-      selectionPanel.appendChild(headingElement);
+      selectionHeader.appendChild(headingElement);
+      if (inspectionTotal > 0) {
+        const progressContainer = document.createElement('div');
+        progressContainer.className = 'motion-browser__inspection-progress';
+        const progressLabel = document.createElement('span');
+        progressLabel.textContent =
+          inspectionCompleted < inspectionTotal
+            ? `Inspecting motions ${inspectionCompleted}/${inspectionTotal}…`
+            : `Inspection complete ${inspectionCompleted}/${inspectionTotal}`;
+        const progress = document.createElement('progress');
+        progress.max = inspectionTotal;
+        progress.value = inspectionCompleted;
+        progressContainer.append(progressLabel, progress);
+        selectionHeader.appendChild(progressContainer);
+      }
+      selectionPanel.appendChild(selectionHeader);
 
       const list = document.createElement('div');
       list.className = 'motion-browser__selection-list';
@@ -5179,7 +5243,10 @@ export class AppController {
       const exportButton = document.createElement('button');
       exportButton.type = 'button';
       exportButton.className = 'toggle-chip';
-      exportButton.textContent = 'Batch Export UFO Training PKL';
+      const activeExport = this.motionBrowserBatchExportProgress;
+      exportButton.textContent = activeExport
+        ? `Exporting ${activeExport.completed}/${activeExport.total}…`
+        : 'Batch Export UFO Training PKL';
       const readyItems = selected
         .map((asset) => ({ asset, inspection: this.motionBrowserInspections.get(asset.id) }))
         .filter(
@@ -5190,30 +5257,52 @@ export class AppController {
             inspection: MotionBrowserInspection & { clip: MotionClip };
           } => Boolean(item.inspection?.compatible && item.inspection.clip),
         );
-      exportButton.disabled = selected.length === 0 || readyItems.length !== selected.length;
-      exportButton.addEventListener('click', () => {
+      exportButton.disabled =
+        Boolean(activeExport) || selected.length === 0 || readyItems.length !== selected.length;
+      exportButton.addEventListener('click', async () => {
+        if (this.motionBrowserBatchExportProgress) {
+          return;
+        }
         try {
           const targetFps = Number(fpsSelect.value);
           const speed = Number(speedInput.value);
           if (!Number.isFinite(speed) || speed < 0.1 || speed > 8) {
             throw new Error('Batch export speed must be between 0.1x and 8x.');
           }
-          const bytes = exportUfoTrainingPklBatch(
+          this.motionBrowserBatchExportProgress = { completed: 0, total: readyItems.length };
+          exportButton.disabled = true;
+          exportButton.textContent = `Exporting 0/${readyItems.length}…`;
+          const pickleParts = await exportUfoTrainingPklBatchPartsAsync(
             readyItems.map(({ asset, inspection }) => ({
-              clip: retimeMotionClip(inspection.clip, targetFps, speed),
+              clip: inspection.clip,
               motionKey: asset.path.replace(/\.[^.]+$/, '').replace(/\//g, '__'),
             })),
             this.motionPlayer,
+            {
+              transformClip: (clip) => retimeMotionClip(clip, targetFps, speed),
+              onProgress: (completed, total) => {
+                this.motionBrowserBatchExportProgress = { completed, total };
+                exportButton.textContent = `Exporting ${completed}/${total}…`;
+              },
+            },
           );
-          const blob = new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' });
+          const blob = new Blob(
+            pickleParts.map((part) => part.buffer as ArrayBuffer),
+            {
+              type: 'application/octet-stream',
+            },
+          );
           const url = URL.createObjectURL(blob);
           const anchor = document.createElement('a');
           anchor.href = url;
           anchor.download = `motion_batch_${readyItems.length}_${Number(speed.toFixed(4))}x_ufo_training.pkl`;
           anchor.click();
-          URL.revokeObjectURL(url);
+          window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
         } catch (error) {
           window.alert(error instanceof Error ? error.message : String(error));
+        } finally {
+          this.motionBrowserBatchExportProgress = null;
+          renderSelection();
         }
       });
       exportControls.append(fpsSelect, speedInput, exportButton);
@@ -5248,11 +5337,14 @@ export class AppController {
     document.body.append(overlay, dialog);
     renderTree();
     renderSelection();
+    const initiallySelectedAssets: MotionBrowserAsset[] = [];
     for (const asset of this.getMotionBrowserAssets()) {
       if (this.motionBrowserSelectedIds.has(asset.id)) {
-        void inspectSelection(asset);
+        initiallySelectedAssets.push(asset);
       }
     }
+    queueInspections(initiallySelectedAssets);
+    renderSelection();
   }
 
   private readonly onExportMotionClick = (): void => {

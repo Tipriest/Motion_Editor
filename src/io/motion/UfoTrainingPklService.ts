@@ -8,8 +8,10 @@ import {
 } from './UfoReferenceNpzService';
 import {
   float32PickleArray,
+  NumpyPickleDictionaryWriter,
   type PickleFloat32Array,
   writeNumpyPickle,
+  writeNumpyPickleParts,
 } from './NumpyPickleWriter';
 
 export interface UfoTrainingMotionRecord {
@@ -149,10 +151,10 @@ export interface UfoTrainingPklBatchItem {
   motionKey: string;
 }
 
-export function exportUfoTrainingPklBatch(
+function buildUfoTrainingPklBatchRecords(
   items: readonly UfoTrainingPklBatchItem[],
   sampler: UfoFrameSampler,
-): Uint8Array {
+): Record<string, UfoTrainingMotionRecord> {
   if (items.length === 0) {
     throw new Error('Select at least one motion for UFO training PKL export.');
   }
@@ -168,5 +170,55 @@ export function exportUfoTrainingPklBatch(
       motionKey,
     );
   }
-  return writeNumpyPickle(records);
+  return records;
+}
+
+export function exportUfoTrainingPklBatch(
+  items: readonly UfoTrainingPklBatchItem[],
+  sampler: UfoFrameSampler,
+): Uint8Array {
+  return writeNumpyPickle(buildUfoTrainingPklBatchRecords(items, sampler));
+}
+
+export function exportUfoTrainingPklBatchParts(
+  items: readonly UfoTrainingPklBatchItem[],
+  sampler: UfoFrameSampler,
+): Uint8Array[] {
+  return writeNumpyPickleParts(buildUfoTrainingPklBatchRecords(items, sampler));
+}
+
+export async function exportUfoTrainingPklBatchPartsAsync(
+  items: readonly UfoTrainingPklBatchItem[],
+  sampler: UfoFrameSampler,
+  options: {
+    transformClip?: (clip: MotionClip) => MotionClip;
+    onProgress?: (completed: number, total: number, motionKey: string) => void;
+  } = {},
+): Promise<Uint8Array[]> {
+  if (items.length === 0) {
+    throw new Error('Select at least one motion for UFO training PKL export.');
+  }
+
+  const writer = new NumpyPickleDictionaryWriter();
+  const motionKeys = new Set<string>();
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const motionKey = sanitizeUfoMotionKey(item.motionKey);
+    if (motionKeys.has(motionKey)) {
+      throw new Error(`Duplicate UFO training motion key: ${motionKey}.`);
+    }
+    motionKeys.add(motionKey);
+    const clip = options.transformClip?.(item.clip) ?? item.clip;
+    writer.add(
+      motionKey,
+      buildUfoTrainingMotionRecord(
+        buildUfoReferenceData(clip, sampler),
+        clip.frameCount,
+        motionKey,
+      ),
+    );
+    options.onProgress?.(index + 1, items.length, motionKey);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+  }
+  return writer.finish();
 }

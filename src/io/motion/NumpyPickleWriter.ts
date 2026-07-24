@@ -26,17 +26,71 @@ function isFloat32ArrayValue(value: unknown): value is PickleFloat32Array {
 }
 
 class Protocol4PickleWriter {
-  private readonly bytes: number[] = [0x80, 0x04];
+  private readonly chunks: Uint8Array[] = [];
+  private currentChunk = new Uint8Array(64 * 1024);
+  private currentOffset = 0;
+  private totalLength = 0;
   private readonly encoder = new TextEncoder();
 
   write(value: unknown): Uint8Array {
+    const chunks = this.writeParts(value);
+    const output = new Uint8Array(this.totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      output.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return output;
+  }
+
+  writeParts(value: unknown): Uint8Array[] {
+    this.byte(0x80);
+    this.byte(0x04);
     this.writeValue(value);
     this.byte(0x2e);
-    return new Uint8Array(this.bytes);
+    this.flushChunk();
+    return this.chunks;
+  }
+
+  beginDictionary(): void {
+    this.byte(0x80);
+    this.byte(0x04);
+    this.byte(0x7d);
+    this.byte(0x28);
+  }
+
+  writeDictionaryEntry(key: string, value: unknown): void {
+    this.unicode(key);
+    this.writeValue(value);
+  }
+
+  finishDictionaryParts(): Uint8Array[] {
+    this.byte(0x75);
+    this.byte(0x2e);
+    this.flushChunk();
+    return this.chunks;
+  }
+
+  private flushChunk(): void {
+    if (this.currentOffset === 0) {
+      return;
+    }
+    const chunk =
+      this.currentOffset === this.currentChunk.length
+        ? this.currentChunk
+        : this.currentChunk.slice(0, this.currentOffset);
+    this.chunks.push(chunk);
+    this.totalLength += chunk.length;
+    this.currentChunk = new Uint8Array(64 * 1024);
+    this.currentOffset = 0;
   }
 
   private byte(value: number): void {
-    this.bytes.push(value & 0xff);
+    if (this.currentOffset >= this.currentChunk.length) {
+      this.flushChunk();
+    }
+    this.currentChunk[this.currentOffset] = value & 0xff;
+    this.currentOffset += 1;
   }
 
   private uint32(value: number): void {
@@ -51,8 +105,21 @@ class Protocol4PickleWriter {
   }
 
   private raw(value: Uint8Array): void {
-    for (const byte of value) {
-      this.byte(byte);
+    let sourceOffset = 0;
+    while (sourceOffset < value.length) {
+      if (this.currentOffset >= this.currentChunk.length) {
+        this.flushChunk();
+      }
+      const writable = Math.min(
+        value.length - sourceOffset,
+        this.currentChunk.length - this.currentOffset,
+      );
+      this.currentChunk.set(
+        value.subarray(sourceOffset, sourceOffset + writable),
+        this.currentOffset,
+      );
+      this.currentOffset += writable;
+      sourceOffset += writable;
     }
   }
 
@@ -107,13 +174,19 @@ class Protocol4PickleWriter {
     }
   }
 
-  private float32Bytes(values: Float32Array): Uint8Array {
-    const output = new Uint8Array(values.length * 4);
-    const view = new DataView(output.buffer);
-    for (let index = 0; index < values.length; index += 1) {
-      view.setFloat32(index * 4, values[index], true);
+  private float32Binary(values: Float32Array): void {
+    this.byte(0x42);
+    this.uint32(values.length * 4);
+    const valuesPerChunk = 16 * 1024;
+    for (let start = 0; start < values.length; start += valuesPerChunk) {
+      const count = Math.min(valuesPerChunk, values.length - start);
+      const buffer = new ArrayBuffer(count * 4);
+      const view = new DataView(buffer);
+      for (let index = 0; index < count; index += 1) {
+        view.setFloat32(index * 4, values[start + index], true);
+      }
+      this.raw(new Uint8Array(buffer));
     }
-    return output;
   }
 
   private writeFloat32Array(value: PickleFloat32Array): void {
@@ -147,7 +220,7 @@ class Protocol4PickleWriter {
     this.byte(0x74);
     this.byte(0x62);
     this.byte(0x89);
-    this.binary(this.float32Bytes(value.data));
+    this.float32Binary(value.data);
     this.byte(0x74);
     this.byte(0x62);
   }
@@ -209,4 +282,24 @@ class Protocol4PickleWriter {
 
 export function writeNumpyPickle(value: unknown): Uint8Array {
   return new Protocol4PickleWriter().write(value);
+}
+
+export function writeNumpyPickleParts(value: unknown): Uint8Array[] {
+  return new Protocol4PickleWriter().writeParts(value);
+}
+
+export class NumpyPickleDictionaryWriter {
+  private readonly writer = new Protocol4PickleWriter();
+
+  constructor() {
+    this.writer.beginDictionary();
+  }
+
+  add(key: string, value: unknown): void {
+    this.writer.writeDictionaryEntry(key, value);
+  }
+
+  finish(): Uint8Array[] {
+    return this.writer.finishDictionaryParts();
+  }
 }

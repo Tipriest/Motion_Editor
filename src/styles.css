@@ -313,6 +313,23 @@ body {
   gap: 0.75rem;
 }
 
+.motion-browser__selection-header,
+.motion-browser__inspection-progress {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.motion-browser__inspection-progress {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.motion-browser__inspection-progress progress {
+  width: 100%;
+  height: 0.55rem;
+  accent-color: var(--accent);
+}
+
 .motion-browser__selection-list {
   display: grid;
   align-content: start;
