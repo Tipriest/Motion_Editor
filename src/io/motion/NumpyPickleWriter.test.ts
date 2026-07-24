@@ -10,7 +10,7 @@ describe('NumpyPickleWriter', () => {
   it('produces identical protocol bytes in contiguous and chunked modes', () => {
     const value = {
       motion: {
-        data: float32PickleArray(new Float32Array(40_000), [20_000, 2]),
+        data: float32PickleArray(new Float32Array(400_000), [200_000, 2]),
         fps: 50,
       },
     };

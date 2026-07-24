@@ -3,6 +3,10 @@ export interface PickleFloat32Array {
   shape: number[];
 }
 
+const NATIVE_LITTLE_ENDIAN =
+  new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+const PICKLE_CHUNK_SIZE = 1024 * 1024;
+
 export function float32PickleArray(
   data: Float32Array,
   shape: number[],
@@ -27,7 +31,7 @@ function isFloat32ArrayValue(value: unknown): value is PickleFloat32Array {
 
 class Protocol4PickleWriter {
   private readonly chunks: Uint8Array[] = [];
-  private currentChunk = new Uint8Array(64 * 1024);
+  private currentChunk = new Uint8Array(PICKLE_CHUNK_SIZE);
   private currentOffset = 0;
   private totalLength = 0;
   private readonly encoder = new TextEncoder();
@@ -81,7 +85,7 @@ class Protocol4PickleWriter {
         : this.currentChunk.slice(0, this.currentOffset);
     this.chunks.push(chunk);
     this.totalLength += chunk.length;
-    this.currentChunk = new Uint8Array(64 * 1024);
+    this.currentChunk = new Uint8Array(PICKLE_CHUNK_SIZE);
     this.currentOffset = 0;
   }
 
@@ -177,6 +181,10 @@ class Protocol4PickleWriter {
   private float32Binary(values: Float32Array): void {
     this.byte(0x42);
     this.uint32(values.length * 4);
+    if (NATIVE_LITTLE_ENDIAN) {
+      this.raw(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
+      return;
+    }
     const valuesPerChunk = 16 * 1024;
     for (let start = 0; start < values.length; start += valuesPerChunk) {
       const count = Math.min(valuesPerChunk, values.length - start);

@@ -1,6 +1,6 @@
-import type { MotionClip } from '../../types/viewer';
+import { Matrix4, Quaternion, Vector3 } from 'three';
+import type { MotionClip, UrdfRobotLike } from '../../types/viewer';
 import {
-  buildUfoReferenceData,
   UFO_POLICY_BODY_NAMES,
   UFO_POLICY_JOINT_NAMES,
   type UfoFrameSampler,
@@ -24,6 +24,10 @@ export interface UfoTrainingMotionRecord {
   joint_names: string[];
   body_names: string[];
   motion_key: string;
+}
+
+interface TransformNode {
+  matrixWorld: any;
 }
 
 function quaternionWxyzToAxisAngle(
@@ -136,13 +140,119 @@ export function buildUfoTrainingMotionRecord(
   };
 }
 
+export function buildUfoTrainingMotionRecordFromClip(
+  clip: MotionClip,
+  sampler: UfoFrameSampler,
+  motionKey: string,
+): UfoTrainingMotionRecord {
+  const frameCount = clip.frameCount;
+  const bodyCount = UFO_POLICY_BODY_NAMES.length;
+  const jointCount = UFO_POLICY_JOINT_NAMES.length;
+  const jointIndices = UFO_POLICY_JOINT_NAMES.map((jointName) => {
+    const index = clip.schema.jointNames.indexOf(jointName);
+    if (index < 0) {
+      throw new Error(`UFO training PKL requires joint "${jointName}".`);
+    }
+    return index;
+  });
+  const rootTranslation = new Float32Array(frameCount * 3);
+  const rootRotationXyzw = new Float32Array(frameCount * 4);
+  const globalQuaternionXyzw = new Float32Array(frameCount * bodyCount * 4);
+  const poseAxisAngle = new Float32Array(frameCount * bodyCount * 3);
+  const dofPosition = new Float32Array(frameCount * jointCount);
+
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const sourceBase = frame * clip.stride + clip.schema.rootComponentCount;
+    for (let joint = 0; joint < jointCount; joint += 1) {
+      const angle = clip.data[sourceBase + jointIndices[joint]];
+      dofPosition[frame * jointCount + joint] = angle;
+      const poseBase = (frame * bodyCount + joint + 1) * 3;
+      const jointName = UFO_POLICY_JOINT_NAMES[joint];
+      if (jointName.includes('_roll_')) {
+        poseAxisAngle[poseBase] = angle;
+      } else if (jointName.includes('_pitch_')) {
+        poseAxisAngle[poseBase + 1] = angle;
+      } else if (jointName.includes('_yaw_')) {
+        poseAxisAngle[poseBase + 2] = angle;
+      }
+    }
+  }
+
+  const inverseModelRoot = new Matrix4();
+  const localMatrix = new Matrix4();
+  const position = new Vector3();
+  const quaternion = new Quaternion();
+  const scale = new Vector3();
+  sampler.sampleClipFrames(clip, (frameIndex: number, robot: UrdfRobotLike) => {
+    const modelRoot = robot.parent as TransformNode | null;
+    if (!modelRoot?.matrixWorld) {
+      throw new Error('UFO training PKL could not resolve the robot model-root transform.');
+    }
+    inverseModelRoot.copy(modelRoot.matrixWorld).invert();
+    for (let body = 0; body < bodyCount; body += 1) {
+      const bodyName = UFO_POLICY_BODY_NAMES[body];
+      const bodyNode = robot.links?.[bodyName] as TransformNode | undefined;
+      if (!bodyNode?.matrixWorld) {
+        throw new Error(`UFO training PKL requires body "${bodyName}".`);
+      }
+      localMatrix.multiplyMatrices(inverseModelRoot, bodyNode.matrixWorld);
+      localMatrix.decompose(position, quaternion, scale);
+      quaternion.normalize();
+      const quaternionBase = (frameIndex * bodyCount + body) * 4;
+      if (frameIndex > 0) {
+        const previousBase = ((frameIndex - 1) * bodyCount + body) * 4;
+        const dot =
+          globalQuaternionXyzw[previousBase] * quaternion.x +
+          globalQuaternionXyzw[previousBase + 1] * quaternion.y +
+          globalQuaternionXyzw[previousBase + 2] * quaternion.z +
+          globalQuaternionXyzw[previousBase + 3] * quaternion.w;
+        if (dot < 0) {
+          quaternion.set(-quaternion.x, -quaternion.y, -quaternion.z, -quaternion.w);
+        }
+      }
+      globalQuaternionXyzw[quaternionBase] = quaternion.x;
+      globalQuaternionXyzw[quaternionBase + 1] = quaternion.y;
+      globalQuaternionXyzw[quaternionBase + 2] = quaternion.z;
+      globalQuaternionXyzw[quaternionBase + 3] = quaternion.w;
+      if (body === 0) {
+        const translationBase = frameIndex * 3;
+        rootTranslation[translationBase] = position.x;
+        rootTranslation[translationBase + 1] = position.y;
+        rootTranslation[translationBase + 2] = position.z;
+        const rootRotationBase = frameIndex * 4;
+        rootRotationXyzw[rootRotationBase] = quaternion.x;
+        rootRotationXyzw[rootRotationBase + 1] = quaternion.y;
+        rootRotationXyzw[rootRotationBase + 2] = quaternion.z;
+        rootRotationXyzw[rootRotationBase + 3] = quaternion.w;
+        poseAxisAngle.set(
+          quaternionWxyzToAxisAngle(
+            quaternion.w,
+            quaternion.x,
+            quaternion.y,
+            quaternion.z,
+          ),
+          frameIndex * bodyCount * 3,
+        );
+      }
+    }
+  });
+
+  return {
+    root_trans_offset: float32PickleArray(rootTranslation, [frameCount, 3]),
+    pose_aa: float32PickleArray(poseAxisAngle, [frameCount, bodyCount, 3]),
+    pose_quat_global: float32PickleArray(globalQuaternionXyzw, [frameCount, bodyCount, 4]),
+    root_rot: float32PickleArray(rootRotationXyzw, [frameCount, 4]),
+    dof_pos: float32PickleArray(dofPosition, [frameCount, jointCount]),
+    fps: clip.fps,
+    joint_names: [...UFO_POLICY_JOINT_NAMES],
+    body_names: [...UFO_POLICY_BODY_NAMES],
+    motion_key: motionKey,
+  };
+}
+
 export function exportUfoTrainingPkl(clip: MotionClip, sampler: UfoFrameSampler): Uint8Array {
   const motionKey = sanitizeUfoMotionKey(clip.name);
-  const record = buildUfoTrainingMotionRecord(
-    buildUfoReferenceData(clip, sampler),
-    clip.frameCount,
-    motionKey,
-  );
+  const record = buildUfoTrainingMotionRecordFromClip(clip, sampler, motionKey);
   return writeNumpyPickle({ [motionKey]: record });
 }
 
@@ -164,11 +274,7 @@ function buildUfoTrainingPklBatchRecords(
     if (records[motionKey]) {
       throw new Error(`Duplicate UFO training motion key: ${motionKey}.`);
     }
-    records[motionKey] = buildUfoTrainingMotionRecord(
-      buildUfoReferenceData(item.clip, sampler),
-      item.clip.frameCount,
-      motionKey,
-    );
+    records[motionKey] = buildUfoTrainingMotionRecordFromClip(item.clip, sampler, motionKey);
   }
   return records;
 }
@@ -211,11 +317,7 @@ export async function exportUfoTrainingPklBatchPartsAsync(
     const clip = options.transformClip?.(item.clip) ?? item.clip;
     writer.add(
       motionKey,
-      buildUfoTrainingMotionRecord(
-        buildUfoReferenceData(clip, sampler),
-        clip.frameCount,
-        motionKey,
-      ),
+      buildUfoTrainingMotionRecordFromClip(clip, sampler, motionKey),
     );
     options.onProgress?.(index + 1, items.length, motionKey);
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));

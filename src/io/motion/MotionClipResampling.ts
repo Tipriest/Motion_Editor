@@ -125,10 +125,17 @@ export function retimeMotionClip(
   if (!Number.isFinite(playbackSpeed) || playbackSpeed <= 0) {
     throw new Error(`Playback speed must be positive, received ${playbackSpeed}.`);
   }
+  const effectiveSourceFps = clip.fps * playbackSpeed;
+  if (Math.abs(effectiveSourceFps - targetFps) < 1e-8) {
+    return {
+      ...clip,
+      fps: targetFps,
+    };
+  }
   return resampleMotionClip(
     {
       ...clip,
-      fps: clip.fps * playbackSpeed,
+      fps: effectiveSourceFps,
     },
     targetFps,
   );

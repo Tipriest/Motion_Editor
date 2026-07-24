@@ -4996,38 +4996,82 @@ export class AppController {
     const expandedTreePaths = new Set<string>();
     const inspectionQueue: MotionBrowserAsset[] = [];
     const queuedInspectionIds = new Set<string>();
-    let isInspectingQueue = false;
+    const inspectionConcurrency = Math.max(
+      2,
+      Math.min(6, navigator.hardwareConcurrency || 4),
+    );
+    let activeInspectionCount = 0;
     let inspectionCompleted = 0;
     let inspectionTotal = 0;
+    let inspectionRenderTimer: number | null = null;
 
-    const processInspectionQueue = async (): Promise<void> => {
-      if (isInspectingQueue) {
+    const scheduleInspectionRender = (): void => {
+      if (isClosed || inspectionRenderTimer !== null) {
         return;
       }
-      isInspectingQueue = true;
-      while (!isClosed && inspectionQueue.length > 0) {
+      inspectionRenderTimer = window.setTimeout(() => {
+        inspectionRenderTimer = null;
+        if (!isClosed) {
+          renderSelection();
+        }
+      }, inspectionTotal > 1_000 ? 500 : inspectionTotal > 500 ? 300 : 150);
+    };
+
+    const processInspectionQueue = (): void => {
+      if (isClosed) {
+        inspectionQueue.length = 0;
+        queuedInspectionIds.clear();
+        return;
+      }
+      while (
+        activeInspectionCount < inspectionConcurrency &&
+        inspectionQueue.length > 0
+      ) {
         const asset = inspectionQueue.shift();
         if (!asset) {
           break;
         }
         queuedInspectionIds.delete(asset.id);
-        if (!this.motionBrowserSelectedIds.has(asset.id)) {
-          this.motionBrowserInspections.delete(asset.id);
-        } else {
-          const inspection = await this.inspectMotionBrowserAsset(asset);
-          if (isClosed) {
-            break;
+        activeInspectionCount += 1;
+        void (async () => {
+          if (!this.motionBrowserSelectedIds.has(asset.id)) {
+            this.motionBrowserInspections.delete(asset.id);
+          } else {
+            const inspection = await this.inspectMotionBrowserAsset(asset);
+            if (!isClosed) {
+              this.motionBrowserInspections.set(asset.id, inspection);
+            }
           }
-          this.motionBrowserInspections.set(asset.id, inspection);
-        }
-        inspectionCompleted += 1;
-        renderSelection();
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      }
-      isInspectingQueue = false;
-      if (isClosed) {
-        inspectionQueue.length = 0;
-        queuedInspectionIds.clear();
+        })()
+          .catch((error: unknown) => {
+            if (!isClosed) {
+              this.motionBrowserInspections.set(asset.id, {
+                status: 'error',
+                format: 'Unsupported',
+                clip: null,
+                compatible: false,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })
+          .finally(() => {
+            activeInspectionCount -= 1;
+            inspectionCompleted += 1;
+            if (
+              !isClosed &&
+              activeInspectionCount === 0 &&
+              inspectionQueue.length === 0
+            ) {
+              if (inspectionRenderTimer !== null) {
+                window.clearTimeout(inspectionRenderTimer);
+                inspectionRenderTimer = null;
+              }
+              renderSelection();
+            } else {
+              scheduleInspectionRender();
+            }
+            processInspectionQueue();
+          });
       }
     };
 
@@ -5039,7 +5083,7 @@ export class AppController {
       if (nextAssets.length === 0) {
         return;
       }
-      if (!isInspectingQueue && inspectionQueue.length === 0) {
+      if (activeInspectionCount === 0 && inspectionQueue.length === 0) {
         inspectionCompleted = 0;
         inspectionTotal = 0;
       }
@@ -5055,7 +5099,7 @@ export class AppController {
           reason: 'Queued for inspection…',
         });
       }
-      void processInspectionQueue();
+      processInspectionQueue();
     };
 
     const toggleAssets = (assets: MotionBrowserAsset[], checked: boolean): void => {
@@ -5177,7 +5221,7 @@ export class AppController {
         const progressLabel = document.createElement('span');
         progressLabel.textContent =
           inspectionCompleted < inspectionTotal
-            ? `Inspecting motions ${inspectionCompleted}/${inspectionTotal}…`
+            ? `Inspecting motions ${inspectionCompleted}/${inspectionTotal} · ${inspectionConcurrency} parallel…`
             : `Inspection complete ${inspectionCompleted}/${inspectionTotal}`;
         const progress = document.createElement('progress');
         progress.max = inspectionTotal;
