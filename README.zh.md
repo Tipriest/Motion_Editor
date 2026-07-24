@@ -44,9 +44,10 @@
 - **平滑根运动**：点击 "Smooth" 按钮平滑相邻关键帧之间的根运动。
 
 ### 动作数据导出
-- **导出格式**：支持导出为 CSV、GMR .pkl、MimicKit .pkl；Tiangong3 还可直接导出 xmigcs UFO Reference .npz。
+- **导出格式**：支持导出为 CSV、GMR .pkl、MimicKit .pkl；Tiangong3 还可导出 UFO MotionLib 训练 .pkl 和 xmigcs UFO Reference .npz。
 - **导出范围、帧率与倍速**：可选择起止帧、目标帧率和 `0.1x–8x` 播放倍速，默认以 50 Hz、1.0x 重采样导出。
 - **实时导出预览**：导出窗口提供小型 3D 画面、播放/暂停、逐帧预览和输出时长摘要；关闭窗口后会恢复原编辑帧和播放状态。
+- **文件命名**：导出文件沿用原 motion 名称，并附加倍速和格式，例如 `left_punch_2x_ufo_training.pkl`。
 - **UFO NPZ**：包含 xmigcs 所需的 29-DOF 关节状态和 30-body 世界运动学数据。
 
 ### 如何创建和导出动作

@@ -15,11 +15,13 @@ import {
   type BvhLinearUnit,
 } from '../io/motion/BvhMotionService';
 import { CsvMotionService } from '../io/motion/CsvMotionService';
+import { buildMotionExportFileName } from '../io/motion/ExportFileName';
 import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import { exportUfoReferenceNpz } from '../io/motion/UfoReferenceNpzService';
+import { exportUfoTrainingPkl } from '../io/motion/UfoTrainingPklService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
@@ -4898,6 +4900,11 @@ export class AppController {
       this.lastLoadResult?.robotName.toLowerCase().includes('tiangong3') === true ||
       this.selectedUrdfPath?.toLowerCase().includes('/tiangong3/') === true;
     if (isTiangong3) {
+      const ufoPklOption = document.createElement('option');
+      ufoPklOption.value = 'ufo-pkl';
+      ufoPklOption.textContent = 'UFO Training PKL (MotionLib)';
+      formatSelect.appendChild(ufoPklOption);
+
       const ufoNpzOption = document.createElement('option');
       ufoNpzOption.value = 'ufo-npz';
       ufoNpzOption.textContent = 'UFO Reference NPZ (xmigcs)';
@@ -5072,9 +5079,16 @@ export class AppController {
       event.preventDefault();
       try {
         const exportClip = buildExportClip();
+        const selectedFormat =
+          formatSelect.value === 'ufo-npz'
+            ? 'ufo-npz'
+            : formatSelect.value === 'ufo-pkl'
+              ? 'ufo-pkl'
+              : 'source';
         this.exportMotionClip(
           exportClip,
-          formatSelect.value === 'ufo-npz' ? 'ufo-npz' : 'source',
+          selectedFormat,
+          Number(speedInput.value),
         );
         closeDialog();
       } catch (error) {
@@ -5153,15 +5167,29 @@ export class AppController {
     }
   }
 
-  private exportMotionClip(clip: MotionClip, format: 'source' | 'ufo-npz' = 'source'): void {
+  private exportMotionClip(
+    clip: MotionClip,
+    format: 'source' | 'ufo-pkl' | 'ufo-npz' = 'source',
+    playbackSpeed = 1,
+  ): void {
     let content: string | Uint8Array;
     let fileName: string;
     let mimeType: string;
 
-    if (format === 'ufo-npz') {
+    if (format === 'ufo-pkl') {
+      console.log('Generating UFO MotionLib training PKL content');
+      content = exportUfoTrainingPkl(clip, this.motionPlayer);
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'ufo_training',
+        'pkl',
+      );
+      mimeType = 'application/octet-stream';
+    } else if (format === 'ufo-npz') {
       console.log('Generating UFO reference NPZ content');
       content = exportUfoReferenceNpz(clip, this.motionPlayer);
-      fileName = 'modified_motion_ufo_29dof.npz';
+      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'ufo_29dof', 'npz');
       mimeType = 'application/zip';
     } else if (this.currentMotionKind === 'csv') {
       console.log('Generating CSV content');
@@ -5169,21 +5197,21 @@ export class AppController {
       const csvContent = this.csvMotionService.toCsv(clip, robotHeight);
       console.log('CSV content generated, length:', csvContent.length);
       content = csvContent;
-      fileName = 'modified_motion.csv';
+      fileName = buildMotionExportFileName(clip.name, playbackSpeed, null, 'csv');
       mimeType = 'text/csv;charset=utf-8';
     } else if (this.currentMotionKind === 'gmr') {
       console.log('Generating GMR PKL content');
       const pklContent = this.gmrMotionService.toGmrPkl(clip);
       console.log('PKL content generated, length:', pklContent.length);
       content = pklContent;
-      fileName = 'modified_motion.pkl';
+      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'gmr', 'pkl');
       mimeType = 'application/octet-stream';
     } else if (this.currentMotionKind === 'mimickit') {
       console.log('Generating MimicKit PKL content');
       const pklContent = this.mimicKitMotionService.toMimicKitPkl(clip);
       console.log('PKL content generated, length:', pklContent.length);
       content = pklContent;
-      fileName = 'modified_motion.pkl';
+      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'mimickit', 'pkl');
       mimeType = 'application/octet-stream';
     } else {
       console.log('Not a supported motion type for export');
