@@ -4992,6 +4992,7 @@ export class AppController {
     importInput.hidden = true;
     let batchFps = 50;
     let batchSpeed = 1;
+    const expandedTreePaths = new Set<string>();
 
     const inspectSelection = async (asset: MotionBrowserAsset): Promise<void> => {
       if (this.motionBrowserInspections.has(asset.id)) {
@@ -5034,11 +5035,21 @@ export class AppController {
       container.className = 'motion-browser__tree-node';
       if (node.path || depth === 0) {
         const details = document.createElement('details');
-        details.open = depth < 2;
+        const nodeIds = collectTreeAssetIds(node);
+        const sourcePrefix = nodeIds[0]?.split(':')[0] ?? node.name;
+        const expandedKey = `${sourcePrefix}:${node.path || node.name}`;
+        details.open = depth < 2 || expandedTreePaths.has(expandedKey);
+        details.addEventListener('toggle', () => {
+          if (details.open) {
+            expandedTreePaths.add(expandedKey);
+          } else {
+            expandedTreePaths.delete(expandedKey);
+          }
+        });
         const summary = document.createElement('summary');
         const folderCheckbox = document.createElement('input');
         folderCheckbox.type = 'checkbox';
-        const ids = collectTreeAssetIds(node);
+        const ids = nodeIds;
         const selectedCount = ids.filter((id) => this.motionBrowserSelectedIds.has(id)).length;
         folderCheckbox.checked = ids.length > 0 && selectedCount === ids.length;
         folderCheckbox.indeterminate = selectedCount > 0 && selectedCount < ids.length;
