@@ -429,6 +429,10 @@ export class G1MotionPlayer {
     return this.currentFrame;
   }
 
+  getIsPlaying(): boolean {
+    return this.isPlaying;
+  }
+
   getFrameCount(): number {
     if (!this.clip) {
       return 0;
@@ -637,10 +641,19 @@ export class G1MotionPlayer {
 
     const elapsedMs = timestamp - this.playbackStartTimeMs;
     const frameCount = this.clip.frameCount;
-    const nextFrame = Math.floor(elapsedMs / this.getFrameDurationMs()) % frameCount;
+    const lastFrame = frameCount - 1;
+    const nextFrame = Math.min(
+      Math.max(0, Math.floor(elapsedMs / this.getFrameDurationMs())),
+      lastFrame,
+    );
 
     if (nextFrame !== this.currentFrame) {
       this.applyFrame(nextFrame);
+    }
+
+    if (nextFrame >= lastFrame) {
+      this.pause();
+      return;
     }
 
     this.rafId = this.requestFrame(this.handleAnimationFrame);

@@ -541,6 +541,28 @@ export class SceneController {
     this.camera.updateProjectionMatrix();
   }
 
+  renderPreview(targetCanvas: HTMLCanvasElement): void {
+    const context = targetCanvas.getContext('2d');
+    if (!context) {
+      return;
+    }
+    this.renderer.render(this.scene, this.camera);
+
+    const targetWidth = Math.max(targetCanvas.width, 1);
+    const targetHeight = Math.max(targetCanvas.height, 1);
+    const sourceWidth = Math.max(this.canvas.width, 1);
+    const sourceHeight = Math.max(this.canvas.height, 1);
+    const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const drawX = (targetWidth - drawWidth) / 2;
+    const drawY = (targetHeight - drawHeight) / 2;
+
+    context.fillStyle = '#07121a';
+    context.fillRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(this.canvas, drawX, drawY, drawWidth, drawHeight);
+  }
+
   resetView(): void {
     this.controls.target.set(0, 0, 0);
     this.camera.position.set(2, 2, 2);

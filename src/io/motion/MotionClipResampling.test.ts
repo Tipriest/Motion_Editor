@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MotionClip } from '../../types/viewer';
-import { resampleMotionClip } from './MotionClipResampling';
+import { resampleMotionClip, retimeMotionClip } from './MotionClipResampling';
 
 function buildClip(): MotionClip {
   const stride = 8;
@@ -67,5 +67,24 @@ describe('resampleMotionClip', () => {
 
   it('rejects invalid target frame rates', () => {
     expect(() => resampleMotionClip(buildClip(), 0)).toThrow(/Target FPS must be positive/);
+  });
+
+  it('retimes output duration while preserving FPS and endpoints', () => {
+    const source = buildClip();
+    const twiceAsFast = retimeMotionClip(source, 100, 2);
+    const halfSpeed = retimeMotionClip(source, 100, 0.5);
+
+    expect(twiceAsFast.fps).toBe(100);
+    expect(twiceAsFast.frameCount).toBe(3);
+    expect(twiceAsFast.data[0]).toBeCloseTo(0);
+    expect(twiceAsFast.data[(twiceAsFast.frameCount - 1) * twiceAsFast.stride]).toBeCloseTo(4);
+
+    expect(halfSpeed.fps).toBe(100);
+    expect(halfSpeed.frameCount).toBe(9);
+    expect(halfSpeed.data[(halfSpeed.frameCount - 1) * halfSpeed.stride]).toBeCloseTo(4);
+  });
+
+  it('rejects invalid playback speed', () => {
+    expect(() => retimeMotionClip(buildClip(), 50, 0)).toThrow(/Playback speed must be positive/);
   });
 });

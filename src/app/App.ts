@@ -17,7 +17,7 @@ import {
 import { CsvMotionService } from '../io/motion/CsvMotionService';
 import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
-import { resampleMotionClip } from '../io/motion/MotionClipResampling';
+import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import { exportUfoReferenceNpz } from '../io/motion/UfoReferenceNpzService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
@@ -4688,6 +4688,7 @@ export class AppController {
 
     const dialog = document.createElement('div');
     dialog.id = 'export-range-dialog';
+    dialog.className = 'export-preview-dialog';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-labelledby', 'export-range-title');
@@ -4700,7 +4701,10 @@ export class AppController {
     dialog.style.borderRadius = '16px';
     dialog.style.padding = '2rem';
     dialog.style.zIndex = '1000';
-    dialog.style.minWidth = '320px';
+    dialog.style.width = 'min(920px, calc(100vw - 2rem))';
+    dialog.style.maxHeight = 'calc(100vh - 2rem)';
+    dialog.style.boxSizing = 'border-box';
+    dialog.style.overflow = 'auto';
     dialog.style.boxShadow = '0 25px 45px rgba(1, 7, 10, 0.45)';
     dialog.style.backdropFilter = 'blur(8px) saturate(120%)';
 
@@ -4721,6 +4725,53 @@ export class AppController {
     const form = document.createElement('form');
     form.style.display = 'grid';
     form.style.gap = '1rem';
+
+    const content = document.createElement('div');
+    content.className = 'export-preview__content';
+
+    const previewPanel = document.createElement('section');
+    previewPanel.className = 'export-preview__panel';
+    previewPanel.setAttribute('aria-label', 'Export preview');
+
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.className = 'export-preview__canvas';
+    previewCanvas.width = 480;
+    previewCanvas.height = 270;
+    previewPanel.appendChild(previewCanvas);
+
+    const previewFrameLabel = document.createElement('span');
+    previewFrameLabel.className = 'export-preview__frame-label';
+    previewFrameLabel.textContent = 'Output frame 1 / 1';
+    previewPanel.appendChild(previewFrameLabel);
+
+    const previewSlider = document.createElement('input');
+    previewSlider.className = 'motion-controls__slider';
+    previewSlider.type = 'range';
+    previewSlider.min = '0';
+    previewSlider.max = '0';
+    previewSlider.step = '1';
+    previewSlider.value = '0';
+    previewSlider.setAttribute('aria-label', 'Export preview frame');
+    previewPanel.appendChild(previewSlider);
+
+    const previewToolbar = document.createElement('div');
+    previewToolbar.className = 'export-preview__toolbar';
+    const previewPlayButton = document.createElement('button');
+    previewPlayButton.type = 'button';
+    previewPlayButton.className = 'toggle-chip';
+    previewPlayButton.textContent = 'Play Preview';
+    previewToolbar.appendChild(previewPlayButton);
+
+    const outputSummary = document.createElement('span');
+    outputSummary.className = 'export-preview__summary';
+    outputSummary.textContent = 'Preparing preview…';
+    previewToolbar.appendChild(outputSummary);
+    previewPanel.appendChild(previewToolbar);
+
+    const settingsPanel = document.createElement('div');
+    settingsPanel.className = 'export-preview__settings';
+    content.append(previewPanel, settingsPanel);
+    form.appendChild(content);
 
     const rangeFields = document.createElement('div');
     rangeFields.style.display = 'grid';
@@ -4757,7 +4808,7 @@ export class AppController {
 
     const startInput = createFrameInput('Start Frame', 1);
     const endInput = createFrameInput('End Frame', clip.frameCount);
-    form.appendChild(rangeFields);
+    settingsPanel.appendChild(rangeFields);
 
     const fpsField = document.createElement('label');
     fpsField.textContent = 'Export Frame Rate';
@@ -4789,7 +4840,32 @@ export class AppController {
       fpsSelect.appendChild(option);
     }
     fpsField.appendChild(fpsSelect);
-    form.appendChild(fpsField);
+    settingsPanel.appendChild(fpsField);
+
+    const speedField = document.createElement('label');
+    speedField.textContent = 'Playback Speed';
+    speedField.style.display = 'grid';
+    speedField.style.gap = '0.35rem';
+    speedField.style.color = 'var(--text-muted)';
+    speedField.style.fontSize = '0.8rem';
+
+    const speedInput = document.createElement('input');
+    speedInput.type = 'number';
+    speedInput.min = '0.1';
+    speedInput.max = '8';
+    speedInput.step = '0.05';
+    speedInput.required = true;
+    speedInput.value = '1';
+    speedInput.style.width = '100%';
+    speedInput.style.boxSizing = 'border-box';
+    speedInput.style.padding = '0.5rem';
+    speedInput.style.border = '1px solid rgba(146, 205, 236, 0.35)';
+    speedInput.style.borderRadius = '8px';
+    speedInput.style.background = 'rgba(7, 22, 32, 0.8)';
+    speedInput.style.color = 'var(--text-main)';
+    speedInput.style.font = 'inherit';
+    speedField.appendChild(speedInput);
+    settingsPanel.appendChild(speedField);
 
     const formatField = document.createElement('label');
     formatField.textContent = 'Export Format';
@@ -4828,7 +4904,7 @@ export class AppController {
       formatSelect.appendChild(ufoNpzOption);
     }
     formatField.appendChild(formatSelect);
-    form.appendChild(formatField);
+    settingsPanel.appendChild(formatField);
 
     const errorText = document.createElement('p');
     errorText.setAttribute('role', 'alert');
@@ -4836,14 +4912,97 @@ export class AppController {
     errorText.style.margin = '0';
     errorText.style.color = '#ff9a9a';
     errorText.style.fontSize = '0.78rem';
-    form.appendChild(errorText);
+    settingsPanel.appendChild(errorText);
 
     const buttons = document.createElement('div');
     buttons.style.display = 'flex';
     buttons.style.gap = '0.5rem';
     buttons.style.justifyContent = 'flex-end';
 
+    const originalClip = this.motionPlayer.getClip();
+    const originalFrame = this.motionPlayer.getCurrentFrame();
+    const originalWasPlaying = this.motionPlayer.getIsPlaying();
+    let previewClip: MotionClip | null = null;
+    let previewAnimationFrameId: number | null = null;
+    let isClosed = false;
+
+    const setError = (error: unknown): void => {
+      errorText.textContent = error instanceof Error ? error.message : String(error);
+      errorText.style.display = 'block';
+    };
+
+    const buildExportClip = (): MotionClip => {
+      const startFrame = Number(startInput.value);
+      const endFrame = Number(endInput.value);
+      const isValidRange =
+        Number.isInteger(startFrame) &&
+        Number.isInteger(endFrame) &&
+        startFrame >= 1 &&
+        endFrame <= clip.frameCount &&
+        startFrame <= endFrame;
+      if (!isValidRange) {
+        throw new Error(
+          `Enter whole-number frames between 1 and ${clip.frameCount}, with start no later than end.`,
+        );
+      }
+
+      const playbackSpeed = Number(speedInput.value);
+      if (!Number.isFinite(playbackSpeed) || playbackSpeed < 0.1 || playbackSpeed > 8) {
+        throw new Error('Playback speed must be between 0.1x and 8x.');
+      }
+
+      const startOffset = (startFrame - 1) * clip.stride;
+      const endOffset = endFrame * clip.stride;
+      const rangedClip: MotionClip = {
+        ...clip,
+        frameCount: endFrame - startFrame + 1,
+        data: clip.data.slice(startOffset, endOffset),
+      };
+      const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
+      return retimeMotionClip(rangedClip, selectedFps, playbackSpeed);
+    };
+
+    const applyPreviewClip = (): void => {
+      try {
+        const nextClip = buildExportClip();
+        this.motionPlayer.pause();
+        this.motionPlayer.loadClip(nextClip);
+        this.motionPlayer.seek(0);
+        previewClip = nextClip;
+        previewSlider.max = String(Math.max(0, nextClip.frameCount - 1));
+        previewSlider.value = '0';
+        const duration =
+          nextClip.frameCount > 1 ? (nextClip.frameCount - 1) / nextClip.fps : 0;
+        outputSummary.textContent =
+          `${nextClip.frameCount} frames · ${duration.toFixed(2)}s · ` +
+          `${nextClip.fps} Hz · ${Number(speedInput.value).toFixed(2)}x`;
+        errorText.style.display = 'none';
+      } catch (error) {
+        setError(error);
+      }
+    };
+
+    const restoreOriginalState = (): void => {
+      this.motionPlayer.pause();
+      this.motionPlayer.loadClip(originalClip);
+      if (originalClip) {
+        this.motionPlayer.seek(originalFrame);
+        if (originalWasPlaying) {
+          this.motionPlayer.play();
+        }
+      }
+    };
+
     const closeDialog = (): void => {
+      if (isClosed) {
+        return;
+      }
+      isClosed = true;
+      if (previewAnimationFrameId !== null) {
+        cancelAnimationFrame(previewAnimationFrameId);
+        previewAnimationFrameId = null;
+      }
+      restoreOriginalState();
       document.removeEventListener('keydown', onKeyDown);
       dialog.remove();
       overlay.remove();
@@ -4869,41 +5028,57 @@ export class AppController {
     buttons.appendChild(exportButton);
     form.appendChild(buttons);
 
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const startFrame = Number(startInput.value);
-      const endFrame = Number(endInput.value);
-      const isValidRange =
-        Number.isInteger(startFrame) &&
-        Number.isInteger(endFrame) &&
-        startFrame >= 1 &&
-        endFrame <= clip.frameCount &&
-        startFrame <= endFrame;
-
-      if (!isValidRange) {
-        errorText.textContent = `Enter whole-number frames between 1 and ${clip.frameCount}, with start no later than end.`;
-        errorText.style.display = 'block';
+    previewPlayButton.addEventListener('click', () => {
+      if (!previewClip) {
         return;
       }
+      if (this.motionPlayer.getIsPlaying()) {
+        this.motionPlayer.pause();
+        return;
+      }
+      if (this.motionPlayer.getCurrentFrame() >= previewClip.frameCount - 1) {
+        this.motionPlayer.seek(0);
+      }
+      this.motionPlayer.play();
+    });
 
-      const startOffset = (startFrame - 1) * clip.stride;
-      const endOffset = endFrame * clip.stride;
-      const rangedClip: MotionClip = {
-        ...clip,
-        frameCount: endFrame - startFrame + 1,
-        data: clip.data.slice(startOffset, endOffset),
-      };
-      const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
-      const exportClip = resampleMotionClip(rangedClip, selectedFps);
+    previewSlider.addEventListener('input', () => {
+      this.motionPlayer.pause();
+      this.motionPlayer.seek(Number(previewSlider.value));
+    });
+
+    for (const input of [startInput, endInput, speedInput]) {
+      input.addEventListener('input', applyPreviewClip);
+    }
+    fpsSelect.addEventListener('change', applyPreviewClip);
+
+    const renderPreview = (): void => {
+      if (isClosed) {
+        return;
+      }
+      const currentFrame = this.motionPlayer.getCurrentFrame();
+      const frameCount = previewClip?.frameCount ?? 1;
+      previewSlider.value = String(Math.min(currentFrame, frameCount - 1));
+      previewFrameLabel.textContent =
+        `Output frame ${Math.min(currentFrame + 1, frameCount)} / ${frameCount}`;
+      previewPlayButton.textContent = this.motionPlayer.getIsPlaying()
+        ? 'Pause Preview'
+        : 'Play Preview';
+      this.sceneController.renderPreview(previewCanvas);
+      previewAnimationFrameId = requestAnimationFrame(renderPreview);
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
       try {
+        const exportClip = buildExportClip();
         this.exportMotionClip(
           exportClip,
           formatSelect.value === 'ufo-npz' ? 'ufo-npz' : 'source',
         );
         closeDialog();
       } catch (error) {
-        errorText.textContent = error instanceof Error ? error.message : String(error);
-        errorText.style.display = 'block';
+        setError(error);
       }
     });
 
@@ -4911,6 +5086,8 @@ export class AppController {
     dialog.appendChild(form);
     document.addEventListener('keydown', onKeyDown);
     document.body.append(overlay, dialog);
+    applyPreviewClip();
+    renderPreview();
     startInput.focus();
     startInput.select();
   }

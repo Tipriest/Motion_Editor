@@ -116,3 +116,20 @@ export function resampleMotionClip(clip: MotionClip, targetFps: number): MotionC
     data: output,
   };
 }
+
+export function retimeMotionClip(
+  clip: MotionClip,
+  targetFps: number,
+  playbackSpeed: number,
+): MotionClip {
+  if (!Number.isFinite(playbackSpeed) || playbackSpeed <= 0) {
+    throw new Error(`Playback speed must be positive, received ${playbackSpeed}.`);
+  }
+  return resampleMotionClip(
+    {
+      ...clip,
+      fps: clip.fps * playbackSpeed,
+    },
+    targetFps,
+  );
+}
