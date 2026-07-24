@@ -5,6 +5,7 @@ import type {
   ViewMode,
   ViewerState,
 } from '../types/viewer';
+import motionAssetPaths from 'virtual:motion-assets';
 import { Box3, Vector3 } from 'three';
 import { dataTransferToFileMap, fileListToFileMap } from '../io/drop/dataTransferToFileMap';
 import { registerDropHandlers } from '../io/drop/registerDropHandlers';
@@ -515,7 +516,7 @@ function collectPresetSmplModels(manifest: ViewerPresetManifest | null): PresetA
 }
 
 type SelectableModelKind = 'urdf' | 'smpl' | 'bvh';
-type SelectableMotionKind = 'csv' | 'mimickit' | 'gmr' | 'bvh' | 'smpl';
+type SelectableMotionKind = 'csv' | 'mimickit' | 'gmr' | 'pkl' | 'bvh' | 'smpl';
 
 interface SelectableModelOption {
   key: string;
@@ -647,6 +648,9 @@ function formatSelectableMotionLabel(kind: SelectableMotionKind, path: string): 
   }
   if (kind === 'gmr') {
     return `GMR · ${baseName}`;
+  }
+  if (kind === 'pkl') {
+    return `PKL · ${baseName}`;
   }
   if (kind === 'bvh') {
     return `BVH · ${baseName}`;
@@ -829,6 +833,44 @@ function collectPresetMotionOptions(manifest: ViewerPresetManifest | null): Sele
   return [...options.values()].sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function collectAssetMotionOptions(paths: string[]): SelectableMotionOption[] {
+  return paths.flatMap((rawPath) => {
+    const path = normalizePath(rawPath);
+    const extension = path.slice(path.lastIndexOf('.')).toLowerCase();
+    const kind: SelectableMotionKind | null =
+      extension === '.csv'
+        ? 'csv'
+        : extension === '.bvh'
+          ? 'bvh'
+          : extension === '.pkl'
+            ? 'pkl'
+            : null;
+    if (!path || !kind) {
+      return [];
+    }
+    return [
+      {
+        key: `asset:${kind}:${path}`,
+        label: formatSelectableMotionLabel(kind, path),
+        kind,
+        selectedMotionPath: path,
+        files: [buildPresetAssetFileFromPath(path)],
+        bindingTags: kind === 'bvh' ? ['bvh'] : [],
+        description: `Discovered at startup from ${path}`,
+      },
+    ];
+  });
+}
+
+function mergeMotionOptions(
+  presetOptions: SelectableMotionOption[],
+  assetOptions: SelectableMotionOption[],
+): SelectableMotionOption[] {
+  const presetPaths = new Set(presetOptions.map((option) => option.selectedMotionPath));
+  return [...presetOptions, ...assetOptions.filter((option) => !presetPaths.has(option.selectedMotionPath))]
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export class AppController {
   private readonly appRoot: HTMLDivElement;
   private readonly sceneController: SceneController;
@@ -977,7 +1019,7 @@ export class AppController {
   private presetUrdfCatalog: PresetAssetFile[] = [];
   private presetSmplModelCatalog: PresetAssetFile[] = [];
   private presetModelCatalog: SelectableModelOption[] = [];
-  private presetMotionCatalog: SelectableMotionOption[] = [];
+  private presetMotionCatalog: SelectableMotionOption[] = collectAssetMotionOptions(motionAssetPaths);
   private capturedObjCatalog: PresetAssetFile[] = buildDefaultCapturedObjectPresetFiles();
   private droppedUrdfFileMap: DroppedFileMap = new Map();
   private droppedSmplModelFileMap: DroppedFileMap = new Map();
@@ -2596,6 +2638,10 @@ export class AppController {
       return motionOption.bindingTags.includes(modelOption.bindingTag);
     }
 
+    if (motionOption.kind === 'pkl') {
+      return true;
+    }
+
     if (
       (motionOption.kind !== 'csv' &&
         motionOption.kind !== 'mimickit' &&
@@ -2766,6 +2812,8 @@ export class AppController {
         await this.loadMimicKitMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else if (motionOption.kind === 'gmr') {
         await this.loadGmrMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
+      } else if (motionOption.kind === 'pkl') {
+        await this.handleDroppedFileMap(motionFileMap);
       } else if (motionOption.kind === 'bvh') {
         await this.loadBvhMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else {
@@ -4068,7 +4116,7 @@ export class AppController {
     this.presetUrdfCatalog = [];
     this.presetSmplModelCatalog = [];
     this.presetModelCatalog = [];
-    this.presetMotionCatalog = [];
+    this.presetMotionCatalog = collectAssetMotionOptions(motionAssetPaths);
     this.capturedObjCatalog = buildDefaultCapturedObjectPresetFiles();
     this.availableUrdfPaths = this.getMergedUrdfModelPaths();
     this.availableSmplModelPaths = this.getMergedSmplModelPaths();
@@ -4092,7 +4140,10 @@ export class AppController {
       this.presetUrdfCatalog = collectPresetUrdfModels(parsedManifest);
       this.presetSmplModelCatalog = collectPresetSmplModels(parsedManifest);
       this.presetModelCatalog = collectPresetModelOptions(parsedManifest);
-      this.presetMotionCatalog = collectPresetMotionOptions(parsedManifest);
+      this.presetMotionCatalog = mergeMotionOptions(
+        collectPresetMotionOptions(parsedManifest),
+        collectAssetMotionOptions(motionAssetPaths),
+      );
       this.capturedObjCatalog =
         parsedManifest.capturedObjects.length > 0
           ? parsedManifest.capturedObjects
@@ -4104,7 +4155,7 @@ export class AppController {
       this.presetUrdfCatalog = [];
       this.presetSmplModelCatalog = [];
       this.presetModelCatalog = [];
-      this.presetMotionCatalog = [];
+      this.presetMotionCatalog = collectAssetMotionOptions(motionAssetPaths);
       this.capturedObjCatalog = buildDefaultCapturedObjectPresetFiles();
     }
 

@@ -5,26 +5,26 @@
   "presets": [
     {
       "id": "tiangong3-boxing-default",
-      "label": "Tiangong3 + Boxing 120Hz",
-      "description": "Default Tiangong3 31-DOF robot with the 251021 boxing GMR motion.",
+      "label": "Tiangong3 + Left Punch",
+      "description": "Default Tiangong3 31-DOF robot with the left punch GMR motion.",
       "model": {
         "urdfPath": "assets/robots/tiangong3/tiangong3.urdf"
       },
       "motion": {
         "kind": "gmr",
-        "path": "assets/motions/251021_04_boxing_120Hz_cm_3DsMax.pkl"
+        "path": "assets/motions/left_punch.pkl"
       }
     },
     {
       "id": "evt2-boxing-default",
-      "label": "EVT2 + Boxing 120Hz",
-      "description": "Default EVT2 31-DOF robot with the 251021 boxing GMR motion.",
+      "label": "EVT2 + Left Punch",
+      "description": "EVT2 31-DOF robot with the left punch GMR motion.",
       "model": {
         "urdfPath": "assets/robots/EVT2/urdf/tiangong2dex_31dof.urdf"
       },
       "motion": {
         "kind": "gmr",
-        "path": "assets/motions/251021_04_boxing_120Hz_cm_3DsMax.pkl"
+        "path": "assets/motions/left_punch.pkl"
       }
     },
     {
