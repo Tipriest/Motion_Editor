@@ -35,6 +35,7 @@
   - `FPS` 输入框：调整 CSV 播放速度
   - `BVH Unit` 下拉框：切换 BVH 单位（`m`、`dm`、`cm`、`inch`、`feet`）
 - **UFO Reference NPZ 输入**：加载 Tiangong3 URDF 后，可拖入 30-body Tiangong3 或 39-body DEX EVT NPZ；应用会读取 pelvis 根姿态和 29 个关节并直接播放。
+- **Robot-State NPZ 输入**：支持包含 `root_pos`、`root_rot (xyzw)`、`dof_pos [T,29]` 和 `fps` 的完整轨迹（例如 `slow_walk.npz`）；缺少 root pose 的纯关节文件不会被加载。
 
 ### 动作数据调整
 - **创建动作**：如果没有动作文件，点击数据集面板中的 "Create Motion" 按钮创建新的动作文件。
