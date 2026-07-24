@@ -538,7 +538,7 @@ interface SelectableMotionOption {
 }
 
 const BVH_PREVIEW_MODEL_KEY = 'builtin:bvh-preview';
-const DEFAULT_STARTUP_PRESET_ID = 'evt2-boxing-default';
+const DEFAULT_STARTUP_PRESET_ID = 'tiangong3-boxing-default';
 
 function buildPresetAssetFileFromPath(path: string): PresetAssetFile {
   return {
@@ -575,6 +575,9 @@ function inferUrdfBindingTag(path: string): string | null {
   }
   if (normalized.includes('/evt2/') || normalized.includes('tiangong2dex')) {
     return 'urdf:evt2';
+  }
+  if (normalized.includes('/tiangong3/') || normalized.includes('tiangong3')) {
+    return 'urdf:tiangong3';
   }
 
   return null;
@@ -625,6 +628,9 @@ function formatSelectableModelLabel(kind: SelectableModelKind, path: string): st
   }
   if (bindingTag === 'urdf:evt2') {
     return 'URDF · EVT2';
+  }
+  if (bindingTag === 'urdf:tiangong3') {
+    return 'URDF · Tiangong3';
   }
 
   return `URDF · ${getBaseName(path) || path}`;
