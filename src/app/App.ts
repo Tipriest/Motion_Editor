@@ -19,6 +19,7 @@ import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { resampleMotionClip } from '../io/motion/MotionClipResampling';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
+import { exportUfoReferenceNpz } from '../io/motion/UfoReferenceNpzService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
@@ -4790,6 +4791,45 @@ export class AppController {
     fpsField.appendChild(fpsSelect);
     form.appendChild(fpsField);
 
+    const formatField = document.createElement('label');
+    formatField.textContent = 'Export Format';
+    formatField.style.display = 'grid';
+    formatField.style.gap = '0.35rem';
+    formatField.style.color = 'var(--text-muted)';
+    formatField.style.fontSize = '0.8rem';
+
+    const formatSelect = document.createElement('select');
+    formatSelect.style.width = '100%';
+    formatSelect.style.boxSizing = 'border-box';
+    formatSelect.style.padding = '0.5rem';
+    formatSelect.style.border = '1px solid rgba(146, 205, 236, 0.35)';
+    formatSelect.style.borderRadius = '8px';
+    formatSelect.style.background = 'rgba(7, 22, 32, 0.8)';
+    formatSelect.style.color = 'var(--text-main)';
+    formatSelect.style.font = 'inherit';
+
+    const sourceFormatOption = document.createElement('option');
+    sourceFormatOption.value = 'source';
+    sourceFormatOption.textContent =
+      this.currentMotionKind === 'csv'
+        ? 'CSV'
+        : this.currentMotionKind === 'mimickit'
+          ? 'MimicKit PKL'
+          : 'GMR PKL';
+    formatSelect.appendChild(sourceFormatOption);
+
+    const isTiangong3 =
+      this.lastLoadResult?.robotName.toLowerCase().includes('tiangong3') === true ||
+      this.selectedUrdfPath?.toLowerCase().includes('/tiangong3/') === true;
+    if (isTiangong3) {
+      const ufoNpzOption = document.createElement('option');
+      ufoNpzOption.value = 'ufo-npz';
+      ufoNpzOption.textContent = 'UFO Reference NPZ (xmigcs)';
+      formatSelect.appendChild(ufoNpzOption);
+    }
+    formatField.appendChild(formatSelect);
+    form.appendChild(formatField);
+
     const errorText = document.createElement('p');
     errorText.setAttribute('role', 'alert');
     errorText.style.display = 'none';
@@ -4855,8 +4895,16 @@ export class AppController {
       };
       const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
       const exportClip = resampleMotionClip(rangedClip, selectedFps);
-      closeDialog();
-      this.exportMotionClip(exportClip);
+      try {
+        this.exportMotionClip(
+          exportClip,
+          formatSelect.value === 'ufo-npz' ? 'ufo-npz' : 'source',
+        );
+        closeDialog();
+      } catch (error) {
+        errorText.textContent = error instanceof Error ? error.message : String(error);
+        errorText.style.display = 'block';
+      }
     });
 
     overlay.addEventListener('click', closeDialog);
@@ -4928,12 +4976,17 @@ export class AppController {
     }
   }
 
-  private exportMotionClip(clip: MotionClip): void {
-    let content: string;
+  private exportMotionClip(clip: MotionClip, format: 'source' | 'ufo-npz' = 'source'): void {
+    let content: string | Uint8Array;
     let fileName: string;
     let mimeType: string;
 
-    if (this.currentMotionKind === 'csv') {
+    if (format === 'ufo-npz') {
+      console.log('Generating UFO reference NPZ content');
+      content = exportUfoReferenceNpz(clip, this.motionPlayer);
+      fileName = 'modified_motion_ufo_29dof.npz';
+      mimeType = 'application/zip';
+    } else if (this.currentMotionKind === 'csv') {
       console.log('Generating CSV content');
       const robotHeight = this.getRobotHeight();
       const csvContent = this.csvMotionService.toCsv(clip, robotHeight);
@@ -4961,7 +5014,8 @@ export class AppController {
     }
 
     try {
-      const blob = new Blob([content], { type: mimeType });
+      const blobPart = typeof content === 'string' ? content : new Uint8Array(content);
+      const blob = new Blob([blobPart], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -4974,7 +5028,9 @@ export class AppController {
       console.log('File downloaded successfully');
     } catch (error) {
       console.error('Error downloading file:', error);
-      alert('下载文件时出错，请查看控制台了解详情。');
+      throw new Error(
+        `Failed to download exported motion: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

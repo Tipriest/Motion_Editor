@@ -19,8 +19,10 @@ export interface UrdfRobotLike {
   name: string;
   joints?: Record<string, UrdfJointLike>;
   links?: Record<string, unknown>;
+  parent?: unknown;
   setJointValue?: (jointName: string, ...values: number[]) => boolean;
   traverse: (callback: (child: unknown) => void) => void;
+  updateMatrixWorld?: (force?: boolean) => void;
 }
 
 export interface LoadResult {

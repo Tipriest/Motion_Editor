@@ -312,8 +312,58 @@ export class G1MotionPlayer {
     this.onJointAnglesChanged?.(this.getJointNames(), this.getCurrentJointValues());
   }
 
-  getClip(): any {
+  getClip(): MotionClip | null {
     return this.clip;
+  }
+
+  sampleClipFrames(
+    clip: MotionClip,
+    visitor: (frameIndex: number, robot: UrdfRobotLike) => void,
+  ): void {
+    if (!this.robot) {
+      throw new Error('A URDF robot must be attached before sampling motion frames.');
+    }
+
+    const originalClip = this.clip;
+    const originalFrame = this.currentFrame;
+    const wasPlaying = this.isPlaying;
+    this.pause();
+
+    const frameChanged = this.onFrameChanged;
+    const jointAnglesChanged = this.onJointAnglesChanged;
+    const warning = this.onWarning;
+    this.onFrameChanged = null;
+    this.onJointAnglesChanged = null;
+    this.onWarning = null;
+
+    try {
+      const binding = this.loadClip(clip);
+      if (binding.missingRequiredJoints.length > 0) {
+        throw new Error(
+          `Cannot sample motion because robot joints are missing: ${binding.missingRequiredJoints.join(', ')}.`,
+        );
+      }
+
+      for (let frameIndex = 0; frameIndex < clip.frameCount; frameIndex += 1) {
+        this.seek(frameIndex);
+        this.robot.updateMatrixWorld?.(true);
+        visitor(frameIndex, this.robot);
+      }
+    } finally {
+      this.loadClip(originalClip);
+      if (originalClip) {
+        this.seek(originalFrame);
+      }
+      this.onFrameChanged = frameChanged;
+      this.onJointAnglesChanged = jointAnglesChanged;
+      this.onWarning = warning;
+      if (originalClip) {
+        this.seek(originalFrame);
+      }
+      if (wasPlaying) {
+        this.play();
+      }
+    }
   }
 
   setFrameCount(newFrameCount: number, insertPosition: 'start' | 'end' = 'end'): void {

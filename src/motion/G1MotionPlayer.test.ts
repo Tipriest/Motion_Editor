@@ -254,6 +254,29 @@ describe('G1MotionPlayer', () => {
     expect(robotWithTransform.position.z).toBeCloseTo(initialPosition.z, 5);
   });
 
+  it('samples temporary clip frames and restores the edited clip state', () => {
+    const { robot } = createMockRobot();
+    const updateMatrixWorld = vi.fn();
+    robot.updateMatrixWorld = updateMatrixWorld;
+    const originalClip = createClip(2);
+    const sampledClip = createClip(3);
+    const player = new G1MotionPlayer();
+    player.attachRobot(robot);
+    player.loadClip(originalClip);
+    player.seek(1);
+
+    const frameEvents: number[] = [];
+    player.onFrameChanged = (snapshot) => frameEvents.push(snapshot.frameIndex);
+    const visitedFrames: number[] = [];
+    player.sampleClipFrames(sampledClip, (frameIndex) => visitedFrames.push(frameIndex));
+
+    expect(visitedFrames).toEqual([0, 1, 2]);
+    expect(updateMatrixWorld).toHaveBeenCalledTimes(3);
+    expect(player.getClip()).toBe(originalClip);
+    expect(player.getCurrentFrame()).toBe(1);
+    expect(frameEvents).toEqual([1]);
+  });
+
   it('stops at the last frame and emits playback state transitions', () => {
     let nowMs = 0;
     let nextRafId = 1;
