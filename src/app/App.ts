@@ -21,9 +21,15 @@ import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { RobotStateNpzMotionService } from '../io/motion/RobotStateNpzMotionService';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
-import { exportUfoReferenceNpz } from '../io/motion/UfoReferenceNpzService';
+import {
+  exportUfoReferenceNpz,
+  UFO_POLICY_JOINT_NAMES,
+} from '../io/motion/UfoReferenceNpzService';
 import { UfoReferenceMotionService } from '../io/motion/UfoReferenceMotionService';
-import { exportUfoTrainingPkl } from '../io/motion/UfoTrainingPklService';
+import {
+  exportUfoTrainingPkl,
+  exportUfoTrainingPklBatch,
+} from '../io/motion/UfoTrainingPklService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
@@ -33,6 +39,12 @@ import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlay
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
 import { SmplMotionPlayer } from '../motion/SmplMotionPlayer';
 import { SceneController } from '../viewer/SceneController';
+import {
+  buildMotionBrowserTree,
+  collectTreeAssetIds,
+  type MotionBrowserAsset,
+  type MotionBrowserTreeNode,
+} from './MotionBrowserCatalog';
 import { getStateCopy } from './state';
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -550,6 +562,23 @@ interface SelectableMotionOption {
   description?: string;
 }
 
+type MotionBrowserFormat =
+  | 'GMR PKL'
+  | 'MimicKit PKL'
+  | 'UFO Reference NPZ'
+  | 'Robot-State NPZ'
+  | 'CSV'
+  | 'BVH'
+  | 'Unsupported';
+
+interface MotionBrowserInspection {
+  status: 'loading' | 'ready' | 'error';
+  format: MotionBrowserFormat;
+  clip: MotionClip | null;
+  compatible: boolean;
+  reason: string;
+}
+
 const BVH_PREVIEW_MODEL_KEY = 'builtin:bvh-preview';
 const DEFAULT_STARTUP_PRESET_ID = 'tiangong3-boxing-default';
 
@@ -929,6 +958,7 @@ export class AppController {
   private readonly resetButton: HTMLButtonElement;
   private readonly presetSelect: HTMLSelectElement;
   private readonly presetLoadButton: HTMLButtonElement;
+  private readonly motionBrowserButton: HTMLButtonElement;
   private readonly objSelect: HTMLSelectElement;
   private readonly exportMotionButton: HTMLButtonElement;
   private readonly prevFrameButton: HTMLButtonElement;
@@ -1037,6 +1067,9 @@ export class AppController {
   private droppedUrdfFileMap: DroppedFileMap = new Map();
   private droppedSmplModelFileMap: DroppedFileMap = new Map();
   private droppedCapturedObjFileMap: DroppedFileMap = new Map();
+  private importedMotionBrowserAssets: MotionBrowserAsset[] = [];
+  private motionBrowserSelectedIds = new Set<string>();
+  private motionBrowserInspections = new Map<string, MotionBrowserInspection>();
   private selectedModelOptionKey: string | null = null;
   private selectedMotionOptionKey: string | null = null;
   private selectedCapturedObjPath: string | null = null;
@@ -1339,6 +1372,7 @@ export class AppController {
     this.resetButton = requireElement<HTMLButtonElement>('reset-btn');
     this.presetSelect = requireElement<HTMLSelectElement>('preset-select');
     this.presetLoadButton = requireElement<HTMLButtonElement>('preset-load-btn');
+    this.motionBrowserButton = requireElement<HTMLButtonElement>('motion-browser-btn');
     this.objSelect = requireElement<HTMLSelectElement>('obj-select');
     this.exportMotionButton = requireElement<HTMLButtonElement>('export-motion-btn');
     this.prevFrameButton = requireElement<HTMLButtonElement>('prev-frame-btn');
@@ -1469,6 +1503,7 @@ export class AppController {
     this.dropOverlayDockButton.addEventListener('click', this.onDropOverlayDockClick);
     this.presetSelect.addEventListener('change', this.onPresetSelectChange);
     this.presetLoadButton.addEventListener('click', this.onPresetLoadClick);
+    this.motionBrowserButton.addEventListener('click', this.onMotionBrowserClick);
     this.objSelect.addEventListener('change', this.onObjSelectChange);
     this.showVisualButton.addEventListener('click', this.onShowVisualClick);
     this.showCollisionButton.addEventListener('click', this.onShowCollisionClick);
@@ -1554,6 +1589,7 @@ export class AppController {
     this.dropOverlayDockButton.removeEventListener('click', this.onDropOverlayDockClick);
     this.presetSelect.removeEventListener('change', this.onPresetSelectChange);
     this.presetLoadButton.removeEventListener('click', this.onPresetLoadClick);
+    this.motionBrowserButton.removeEventListener('click', this.onMotionBrowserClick);
     this.objSelect.removeEventListener('change', this.onObjSelectChange);
     this.showVisualButton.removeEventListener('click', this.onShowVisualClick);
     this.showCollisionButton.removeEventListener('click', this.onShowCollisionClick);
@@ -4747,6 +4783,465 @@ export class AppController {
         this.keyframeMarkersContainer.appendChild(marker);
       }
     });
+  }
+
+  private getMotionBrowserAssets(): MotionBrowserAsset[] {
+    const builtIn = motionAssetPaths.map((path) => {
+      const normalized = normalizePath(path);
+      return {
+        id: `builtin:${normalized}`,
+        path: normalized.replace(/^assets\/motions\/?/, ''),
+        source: 'builtin' as const,
+      };
+    });
+    return [...builtIn, ...this.importedMotionBrowserAssets];
+  }
+
+  private async getMotionBrowserFileMap(asset: MotionBrowserAsset): Promise<DroppedFileMap> {
+    if (asset.source === 'imported' && asset.file) {
+      return new Map([[asset.path, asset.file]]);
+    }
+    const fullPath = asset.id.replace(/^builtin:/, '');
+    return this.fetchPresetFileMap([
+      {
+        path: fullPath,
+        mapAs: fullPath,
+      },
+    ]);
+  }
+
+  private async inspectMotionBrowserAsset(
+    asset: MotionBrowserAsset,
+  ): Promise<MotionBrowserInspection> {
+    const extension = asset.path.slice(asset.path.lastIndexOf('.')).toLowerCase();
+    if (extension === '.bvh') {
+      return {
+        status: 'ready',
+        format: 'BVH',
+        clip: null,
+        compatible: false,
+        reason: 'BVH does not contain Tiangong3 29-DOF joint data.',
+      };
+    }
+    const loadedRobot = this.lastLoadResult;
+    if (!loadedRobot) {
+      return {
+        status: 'ready',
+        format: extension === '.csv' ? 'CSV' : 'Unsupported',
+        clip: null,
+        compatible: false,
+        reason: 'Load the Tiangong3 URDF before inspecting batch motions.',
+      };
+    }
+
+    try {
+      const fileMap = await this.getMotionBrowserFileMap(asset);
+      let clip: MotionClip;
+      let format: MotionBrowserFormat;
+      const selectedPath = [...fileMap.keys()][0];
+      if (extension === '.csv') {
+        const result = await this.csvMotionService.loadFromDroppedFiles(
+          fileMap,
+          loadedRobot.motionSchema,
+          selectedPath,
+        );
+        clip = result.clip;
+        format = 'CSV';
+      } else if (extension === '.pkl') {
+        try {
+          const result = await this.gmrMotionService.loadFromDroppedFiles(
+            fileMap,
+            loadedRobot.motionSchema,
+            selectedPath,
+          );
+          clip = result.clip;
+          format = 'GMR PKL';
+        } catch {
+          const result = await this.mimicKitMotionService.loadFromDroppedFiles(
+            fileMap,
+            loadedRobot.motionSchema,
+            selectedPath,
+          );
+          clip = result.clip;
+          format = 'MimicKit PKL';
+        }
+      } else if (extension === '.npz') {
+        const ufoPaths = await this.ufoReferenceMotionService.findCompatiblePaths(fileMap, 1);
+        if (ufoPaths.length > 0) {
+          const result = await this.ufoReferenceMotionService.loadFromDroppedFiles(
+            fileMap,
+            ufoPaths[0],
+          );
+          clip = result.clip;
+          format = 'UFO Reference NPZ';
+        } else {
+          const robotStatePaths = await this.robotStateNpzMotionService.findCompatiblePaths(
+            fileMap,
+            1,
+          );
+          if (robotStatePaths.length === 0) {
+            throw new Error('NPZ is not a supported UFO Reference or complete Robot-State motion.');
+          }
+          const result = await this.robotStateNpzMotionService.loadFromDroppedFiles(
+            fileMap,
+            robotStatePaths[0],
+          );
+          clip = result.clip;
+          format = 'Robot-State NPZ';
+        }
+      } else {
+        throw new Error(`Unsupported motion extension: ${extension || '(none)'}.`);
+      }
+
+      const missingJoints = UFO_POLICY_JOINT_NAMES.filter(
+        (jointName) => !clip.schema.jointNames.includes(jointName),
+      );
+      const isTiangong3 =
+        loadedRobot.robotName.toLowerCase().includes('tiangong3') ||
+        this.selectedUrdfPath?.toLowerCase().includes('/tiangong3/') === true;
+      const compatible = isTiangong3 && missingJoints.length === 0;
+      return {
+        status: 'ready',
+        format,
+        clip,
+        compatible,
+        reason: compatible
+          ? 'Ready for UFO Training PKL.'
+          : !isTiangong3
+            ? 'Active model is not Tiangong3.'
+            : `Missing joints: ${missingJoints.join(', ')}.`,
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        format: 'Unsupported',
+        clip: null,
+        compatible: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private readonly onMotionBrowserClick = (): void => {
+    this.showMotionBrowser();
+  };
+
+  private showMotionBrowser(): void {
+    document.getElementById('motion-browser-dialog')?.remove();
+    document.getElementById('motion-browser-overlay')?.remove();
+    this.motionBrowserInspections.clear();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'motion-browser-overlay';
+    overlay.className = 'motion-browser-overlay';
+    const dialog = document.createElement('section');
+    dialog.id = 'motion-browser-dialog';
+    dialog.className = 'motion-browser-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'motion-browser-title');
+
+    const header = document.createElement('div');
+    header.className = 'motion-browser__header';
+    const heading = document.createElement('div');
+    const title = document.createElement('h2');
+    title.id = 'motion-browser-title';
+    title.textContent = 'Motion Browser';
+    const subtitle = document.createElement('p');
+    subtitle.textContent =
+      'Browse one motion for editing, or select compatible motions for a combined UFO Training PKL.';
+    heading.append(title, subtitle);
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'toggle-chip ghost';
+    closeButton.textContent = 'Close';
+    header.append(heading, closeButton);
+    dialog.appendChild(header);
+
+    const layout = document.createElement('div');
+    layout.className = 'motion-browser__layout';
+    const treePanel = document.createElement('div');
+    treePanel.className = 'motion-browser__tree-panel';
+    const selectionPanel = document.createElement('div');
+    selectionPanel.className = 'motion-browser__selection-panel';
+    layout.append(treePanel, selectionPanel);
+    dialog.appendChild(layout);
+
+    let isClosed = false;
+    const close = (): void => {
+      if (isClosed) {
+        return;
+      }
+      isClosed = true;
+      document.removeEventListener('keydown', onKeyDown);
+      dialog.remove();
+      overlay.remove();
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        close();
+      }
+    };
+    closeButton.addEventListener('click', close);
+    overlay.addEventListener('click', close);
+
+    const importInput = document.createElement('input');
+    importInput.type = 'file';
+    importInput.multiple = true;
+    importInput.setAttribute('webkitdirectory', '');
+    importInput.hidden = true;
+    let batchFps = 50;
+    let batchSpeed = 1;
+
+    const inspectSelection = async (asset: MotionBrowserAsset): Promise<void> => {
+      if (this.motionBrowserInspections.has(asset.id)) {
+        return;
+      }
+      this.motionBrowserInspections.set(asset.id, {
+        status: 'loading',
+        format: 'Unsupported',
+        clip: null,
+        compatible: false,
+        reason: 'Inspecting motion…',
+      });
+      renderSelection();
+      const inspection = await this.inspectMotionBrowserAsset(asset);
+      this.motionBrowserInspections.set(asset.id, inspection);
+      if (!isClosed) {
+        renderSelection();
+      }
+    };
+
+    const toggleAssets = (assets: MotionBrowserAsset[], checked: boolean): void => {
+      for (const asset of assets) {
+        if (checked) {
+          this.motionBrowserSelectedIds.add(asset.id);
+          void inspectSelection(asset);
+        } else {
+          this.motionBrowserSelectedIds.delete(asset.id);
+        }
+      }
+      renderTree();
+      renderSelection();
+    };
+
+    const renderNode = (
+      node: MotionBrowserTreeNode,
+      assetById: Map<string, MotionBrowserAsset>,
+      depth: number,
+    ): HTMLElement => {
+      const container = document.createElement('div');
+      container.className = 'motion-browser__tree-node';
+      if (node.path || depth === 0) {
+        const details = document.createElement('details');
+        details.open = depth < 2;
+        const summary = document.createElement('summary');
+        const folderCheckbox = document.createElement('input');
+        folderCheckbox.type = 'checkbox';
+        const ids = collectTreeAssetIds(node);
+        const selectedCount = ids.filter((id) => this.motionBrowserSelectedIds.has(id)).length;
+        folderCheckbox.checked = ids.length > 0 && selectedCount === ids.length;
+        folderCheckbox.indeterminate = selectedCount > 0 && selectedCount < ids.length;
+        folderCheckbox.addEventListener('click', (event) => event.stopPropagation());
+        folderCheckbox.addEventListener('change', () => {
+          toggleAssets(
+            ids.map((id) => assetById.get(id)).filter((asset): asset is MotionBrowserAsset => Boolean(asset)),
+            folderCheckbox.checked,
+          );
+        });
+        const label = document.createElement('span');
+        label.textContent = node.name;
+        summary.append(folderCheckbox, label);
+        details.appendChild(summary);
+
+        const children = document.createElement('div');
+        children.className = 'motion-browser__tree-children';
+        for (const directory of node.directories) {
+          children.appendChild(renderNode(directory, assetById, depth + 1));
+        }
+        for (const fileAsset of node.files) {
+          const asset = assetById.get(fileAsset.id) ?? fileAsset;
+          const row = document.createElement('label');
+          row.className = 'motion-browser__file';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = this.motionBrowserSelectedIds.has(asset.id);
+          checkbox.addEventListener('change', () => toggleAssets([asset], checkbox.checked));
+          const name = document.createElement('span');
+          name.textContent = asset.path.split('/').pop() ?? asset.path;
+          row.append(checkbox, name);
+          children.appendChild(row);
+        }
+        details.appendChild(children);
+        container.appendChild(details);
+      }
+      return container;
+    };
+
+    const renderTree = (): void => {
+      treePanel.innerHTML = '';
+      const toolbar = document.createElement('div');
+      toolbar.className = 'motion-browser__tree-toolbar';
+      const importButton = document.createElement('button');
+      importButton.type = 'button';
+      importButton.className = 'toggle-chip ghost';
+      importButton.textContent = 'Import External Folder';
+      importButton.addEventListener('click', () => importInput.click());
+      toolbar.append(importButton, importInput);
+      treePanel.appendChild(toolbar);
+
+      const assets = this.getMotionBrowserAssets();
+      const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+      const builtIn = assets.filter((asset) => asset.source === 'builtin');
+      const imported = assets.filter((asset) => asset.source === 'imported');
+      treePanel.appendChild(
+        renderNode(buildMotionBrowserTree('assets/motions', builtIn), assetById, 0),
+      );
+      if (imported.length > 0) {
+        treePanel.appendChild(
+          renderNode(buildMotionBrowserTree('Imported folders', imported), assetById, 0),
+        );
+      }
+    };
+
+    const renderSelection = (): void => {
+      selectionPanel.innerHTML = '';
+      const assets = this.getMotionBrowserAssets();
+      const selected = assets.filter((asset) => this.motionBrowserSelectedIds.has(asset.id));
+      const headingElement = document.createElement('h3');
+      headingElement.textContent = `Selected motions (${selected.length})`;
+      selectionPanel.appendChild(headingElement);
+
+      const list = document.createElement('div');
+      list.className = 'motion-browser__selection-list';
+      for (const asset of selected) {
+        const inspection = this.motionBrowserInspections.get(asset.id);
+        const card = document.createElement('article');
+        card.className = `motion-browser__selection-card ${
+          inspection?.compatible ? 'is-compatible' : ''
+        }`;
+        const name = document.createElement('strong');
+        name.textContent = asset.path;
+        const metadata = document.createElement('span');
+        metadata.textContent =
+          inspection?.status === 'ready' && inspection.clip
+            ? `${inspection.format} · ${inspection.clip.frameCount} frames · ${inspection.clip.fps} Hz`
+            : inspection?.reason ?? 'Waiting for inspection…';
+        const status = document.createElement('span');
+        status.textContent = inspection?.compatible ? 'Compatible' : inspection?.reason ?? 'Pending';
+        card.append(name, metadata, status);
+        list.appendChild(card);
+      }
+      if (selected.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'motion-browser__empty';
+        empty.textContent = 'Select files or an entire folder from the tree.';
+        list.appendChild(empty);
+      }
+      selectionPanel.appendChild(list);
+
+      const exportControls = document.createElement('div');
+      exportControls.className = 'motion-browser__export-controls';
+      const fpsSelect = document.createElement('select');
+      fpsSelect.className = 'preset-picker__select';
+      for (const fps of [30, 50, 60, 100, 120]) {
+        const option = document.createElement('option');
+        option.value = String(fps);
+        option.textContent = `${fps} Hz`;
+        option.selected = fps === batchFps;
+        fpsSelect.appendChild(option);
+      }
+      fpsSelect.addEventListener('change', () => {
+        batchFps = Number(fpsSelect.value);
+      });
+      const speedInput = document.createElement('input');
+      speedInput.type = 'number';
+      speedInput.min = '0.1';
+      speedInput.max = '8';
+      speedInput.step = '0.05';
+      speedInput.value = String(batchSpeed);
+      speedInput.className = 'motion-browser__speed';
+      speedInput.setAttribute('aria-label', 'Batch export speed');
+      speedInput.addEventListener('change', () => {
+        batchSpeed = Number(speedInput.value);
+      });
+      const exportButton = document.createElement('button');
+      exportButton.type = 'button';
+      exportButton.className = 'toggle-chip';
+      exportButton.textContent = 'Batch Export UFO Training PKL';
+      const readyItems = selected
+        .map((asset) => ({ asset, inspection: this.motionBrowserInspections.get(asset.id) }))
+        .filter(
+          (
+            item,
+          ): item is {
+            asset: MotionBrowserAsset;
+            inspection: MotionBrowserInspection & { clip: MotionClip };
+          } => Boolean(item.inspection?.compatible && item.inspection.clip),
+        );
+      exportButton.disabled = selected.length === 0 || readyItems.length !== selected.length;
+      exportButton.addEventListener('click', () => {
+        try {
+          const targetFps = Number(fpsSelect.value);
+          const speed = Number(speedInput.value);
+          if (!Number.isFinite(speed) || speed < 0.1 || speed > 8) {
+            throw new Error('Batch export speed must be between 0.1x and 8x.');
+          }
+          const bytes = exportUfoTrainingPklBatch(
+            readyItems.map(({ asset, inspection }) => ({
+              clip: retimeMotionClip(inspection.clip, targetFps, speed),
+              motionKey: asset.path.replace(/\.[^.]+$/, '').replace(/\//g, '__'),
+            })),
+            this.motionPlayer,
+          );
+          const blob = new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = `motion_batch_${readyItems.length}_${Number(speed.toFixed(4))}x_ufo_training.pkl`;
+          anchor.click();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+      exportControls.append(fpsSelect, speedInput, exportButton);
+      selectionPanel.appendChild(exportControls);
+    };
+
+    importInput.addEventListener('change', () => {
+      const files = Array.from(importInput.files ?? []);
+      const supported = new Set(['.csv', '.pkl', '.npz', '.bvh']);
+      const next = new Map(this.importedMotionBrowserAssets.map((asset) => [asset.id, asset]));
+      for (const file of files) {
+        const relativePath = normalizePath(file.webkitRelativePath || file.name);
+        const extension = relativePath.slice(relativePath.lastIndexOf('.')).toLowerCase();
+        if (!supported.has(extension)) {
+          continue;
+        }
+        const id = `imported:${relativePath}`;
+        next.set(id, {
+          id,
+          path: relativePath,
+          source: 'imported',
+          file,
+        });
+      }
+      this.importedMotionBrowserAssets = [...next.values()];
+      renderTree();
+      renderSelection();
+      importInput.value = '';
+    });
+
+    document.addEventListener('keydown', onKeyDown);
+    document.body.append(overlay, dialog);
+    renderTree();
+    renderSelection();
+    for (const asset of this.getMotionBrowserAssets()) {
+      if (this.motionBrowserSelectedIds.has(asset.id)) {
+        void inspectSelection(asset);
+      }
+    }
   }
 
   private readonly onExportMotionClick = (): void => {

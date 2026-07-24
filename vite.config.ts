@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 
 const MOTION_ASSET_MODULE_ID = 'virtual:motion-assets';
 const RESOLVED_MOTION_ASSET_MODULE_ID = `\0${MOTION_ASSET_MODULE_ID}`;
-const SUPPORTED_MOTION_EXTENSIONS = new Set(['.bvh', '.csv', '.pkl']);
+const SUPPORTED_MOTION_EXTENSIONS = new Set(['.bvh', '.csv', '.pkl', '.npz']);
 
 function scanMotionAssets(directory: string, root = directory): string[] {
   try {

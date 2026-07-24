@@ -66,7 +66,7 @@ function jointAxisAngle(jointName: string, angle: number): [number, number, numb
   throw new Error(`Cannot infer UFO joint axis for "${jointName}".`);
 }
 
-function sanitizeMotionKey(name: string): string {
+export function sanitizeUfoMotionKey(name: string): string {
   const withoutExtension = name.replace(/\.[^.]+$/, '');
   const sanitized = withoutExtension.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
   return sanitized || 'modified_motion';
@@ -135,11 +135,38 @@ export function buildUfoTrainingMotionRecord(
 }
 
 export function exportUfoTrainingPkl(clip: MotionClip, sampler: UfoFrameSampler): Uint8Array {
-  const motionKey = sanitizeMotionKey(clip.name);
+  const motionKey = sanitizeUfoMotionKey(clip.name);
   const record = buildUfoTrainingMotionRecord(
     buildUfoReferenceData(clip, sampler),
     clip.frameCount,
     motionKey,
   );
   return writeNumpyPickle({ [motionKey]: record });
+}
+
+export interface UfoTrainingPklBatchItem {
+  clip: MotionClip;
+  motionKey: string;
+}
+
+export function exportUfoTrainingPklBatch(
+  items: readonly UfoTrainingPklBatchItem[],
+  sampler: UfoFrameSampler,
+): Uint8Array {
+  if (items.length === 0) {
+    throw new Error('Select at least one motion for UFO training PKL export.');
+  }
+  const records: Record<string, UfoTrainingMotionRecord> = {};
+  for (const item of items) {
+    const motionKey = sanitizeUfoMotionKey(item.motionKey);
+    if (records[motionKey]) {
+      throw new Error(`Duplicate UFO training motion key: ${motionKey}.`);
+    }
+    records[motionKey] = buildUfoTrainingMotionRecord(
+      buildUfoReferenceData(item.clip, sampler),
+      item.clip.frameCount,
+      motionKey,
+    );
+  }
+  return writeNumpyPickle(records);
 }

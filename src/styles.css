@@ -211,6 +211,156 @@ body {
   white-space: nowrap;
 }
 
+.motion-browser-launch {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.motion-browser-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(5px);
+}
+
+.motion-browser-dialog {
+  position: fixed;
+  inset: 4vh 4vw;
+  z-index: 1101;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(146, 205, 236, 0.35);
+  border-radius: 16px;
+  background: rgba(6, 12, 17, 0.98);
+  box-shadow: 0 25px 55px rgba(1, 7, 10, 0.6);
+}
+
+.motion-browser__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(146, 205, 236, 0.22);
+}
+
+.motion-browser__header h2,
+.motion-browser__header p,
+.motion-browser__selection-panel h3 {
+  margin: 0;
+}
+
+.motion-browser__header p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.motion-browser__layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(400px, 1.4fr);
+  min-height: 0;
+}
+
+.motion-browser__tree-panel,
+.motion-browser__selection-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.motion-browser__tree-panel {
+  border-right: 1px solid rgba(146, 205, 236, 0.2);
+}
+
+.motion-browser__tree-toolbar,
+.motion-browser__export-controls {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.motion-browser__tree-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.motion-browser__tree-node details {
+  margin: 0.18rem 0;
+}
+
+.motion-browser__tree-node summary,
+.motion-browser__file {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.8rem;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.motion-browser__tree-children {
+  margin-left: 1rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid rgba(146, 205, 236, 0.18);
+}
+
+.motion-browser__selection-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.motion-browser__selection-list {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  overflow: auto;
+}
+
+.motion-browser__selection-card {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(146, 205, 236, 0.22);
+  border-radius: 9px;
+  background: rgba(7, 22, 32, 0.64);
+  font-size: 0.75rem;
+}
+
+.motion-browser__selection-card.is-compatible {
+  border-color: rgba(131, 223, 193, 0.55);
+}
+
+.motion-browser__selection-card span {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.motion-browser__empty {
+  color: var(--text-muted);
+}
+
+.motion-browser__export-controls {
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(146, 205, 236, 0.2);
+}
+
+.motion-browser__export-controls .preset-picker__select {
+  width: 110px;
+}
+
+.motion-browser__speed {
+  width: 75px;
+  padding: 0.5rem;
+  border: 1px solid rgba(146, 205, 236, 0.35);
+  border-radius: 8px;
+  background: rgba(7, 22, 32, 0.8);
+  color: var(--text-main);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -1454,6 +1604,21 @@ body {
 }
 
 @media (max-width: 900px) {
+  .motion-browser-dialog {
+    inset: 1rem;
+  }
+
+  .motion-browser__layout {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .motion-browser__tree-panel {
+    max-height: 42vh;
+    border-right: 0;
+    border-bottom: 1px solid rgba(146, 205, 236, 0.2);
+  }
+
   .export-preview-dialog {
     padding: 1rem !important;
   }

@@ -36,6 +36,7 @@
   - `BVH Unit` 下拉框：切换 BVH 单位（`m`、`dm`、`cm`、`inch`、`feet`）
 - **UFO Reference NPZ 输入**：加载 Tiangong3 URDF 后，可拖入 30-body Tiangong3 或 39-body DEX EVT NPZ；应用会读取 pelvis 根姿态和 29 个关节并直接播放。
 - **Robot-State NPZ 输入**：支持包含 `root_pos`、`root_rot (xyzw)`、`dof_pos [T,29]` 和 `fps` 的完整轨迹（例如 `slow_walk.npz`）；缺少 root pose 的纯关节文件不会被加载。
+- **Motion Browser**：递归展示 `assets/motions/` 的目录树，支持文件夹全选、文件多选和外部文件夹临时导入；右侧会显示格式、帧数、FPS 与 Tiangong3 UFO 兼容状态。
 
 ### 动作数据调整
 - **创建动作**：如果没有动作文件，点击数据集面板中的 "Create Motion" 按钮创建新的动作文件。
@@ -51,6 +52,7 @@
 - **实时导出预览**：导出窗口提供小型 3D 画面、播放/暂停、逐帧预览和输出时长摘要；关闭窗口后会恢复原编辑帧和播放状态。
 - **文件命名**：导出文件沿用原 motion 名称，并附加倍速和格式，例如 `left_punch_2x_ufo_training.pkl`。
 - **UFO NPZ**：包含 xmigcs 所需的 29-DOF 关节状态和 30-body 世界运动学数据。
+- **批量 UFO Training PKL**：Motion Browser 可以将多段兼容 motion 按完整相对路径生成唯一 motion key，并合并到一个训练 PKL 中。
 
 ### 如何创建和导出动作
 1. 通过拖放 URDF 文件夹加载 URDF 机器人模型。
