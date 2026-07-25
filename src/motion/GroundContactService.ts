@@ -11,6 +11,12 @@ export interface GroundContactPoint {
   isContact: boolean;
 }
 
+export interface FootSoleDefinition {
+  footName: string;
+  link: any;
+  localCenter: { x: number; y: number; z: number };
+}
+
 interface FootProbe {
   footName: string;
   probeName: string;
@@ -211,6 +217,34 @@ export class GroundContactService {
 
   getProbeCount(): number {
     return this.footProbes.length;
+  }
+
+  getFootSole(side: 'left' | 'right'): FootSoleDefinition | null {
+    this.buildFootOutlineProbes();
+    const sideToken = side === 'left' ? '_l_' : '_r_';
+    const probes = this.footProbes.filter(({ footName }) =>
+      footName.toLowerCase().includes(sideToken),
+    );
+    if (probes.length === 0) {
+      return null;
+    }
+    const center = probes.reduce(
+      (result, probe) => {
+        result.x += probe.localPoint.x;
+        result.y += probe.localPoint.y;
+        result.z += probe.localPoint.z;
+        return result;
+      },
+      { x: 0, y: 0, z: 0 },
+    );
+    center.x /= probes.length;
+    center.y /= probes.length;
+    center.z /= probes.length;
+    return {
+      footName: probes[0].footName,
+      link: probes[0].link,
+      localCenter: center,
+    };
   }
 
   compute(

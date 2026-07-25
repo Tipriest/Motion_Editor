@@ -40,6 +40,8 @@ describe('GroundContactService', () => {
 
     expect(service.getFootLinkCount()).toBe(1);
     expect(service.getProbeCount()).toBeGreaterThanOrEqual(12);
+    expect(service.getFootSole('left')?.footName).toBe('ankle_roll_l_link');
+    expect(service.getFootSole('right')).toBeNull();
     expect(contacts.every(({ isContact }) => isContact)).toBe(true);
     expect(contacts.every((point) => point.footName === 'ankle_roll_l_link')).toBe(true);
 

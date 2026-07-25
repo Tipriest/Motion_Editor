@@ -39,6 +39,10 @@ import {
   CenterOfMassService,
   type CenterOfMassPoint,
 } from '../motion/CenterOfMassService';
+import {
+  FootGroundAlignmentService,
+  type FootSide,
+} from '../motion/FootGroundAlignmentService';
 import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlayer';
 import { GroundContactService } from '../motion/GroundContactService';
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
@@ -931,6 +935,7 @@ export class AppController {
   private readonly motionPlayer: G1MotionPlayer;
   private readonly centerOfMassService: CenterOfMassService;
   private readonly groundContactService: GroundContactService;
+  private readonly footGroundAlignmentService: FootGroundAlignmentService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -949,6 +954,9 @@ export class AppController {
   private readonly viewModeButton: HTMLButtonElement;
   private readonly centerOfMassButton: HTMLButtonElement;
   private readonly groundContactsButton: HTMLButtonElement;
+  private readonly alignLeftFootButton: HTMLButtonElement;
+  private readonly alignRightFootButton: HTMLButtonElement;
+  private readonly footAlignSmoothFramesInput: HTMLInputElement;
   private readonly modePropsPanel: HTMLElement;
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
@@ -1238,6 +1246,75 @@ export class AppController {
     this.syncVisibilityButtons();
   };
 
+  private readonly onAlignLeftFootClick = (): void => {
+    void this.alignFootToGround('left');
+  };
+
+  private readonly onAlignRightFootClick = (): void => {
+    void this.alignFootToGround('right');
+  };
+
+  private async alignFootToGround(side: FootSide): Promise<void> {
+    if (!this.lastLoadResult || !this.currentMotionClip) {
+      return;
+    }
+    const sole = this.groundContactService.getFootSole(side);
+    if (!sole) {
+      window.alert(`Could not resolve the ${side} foot sole outline.`);
+      return;
+    }
+    const smoothFrames = Math.max(
+      0,
+      Math.min(200, Math.round(Number(this.footAlignSmoothFramesInput.value) || 0)),
+    );
+    this.footAlignSmoothFramesInput.value = String(smoothFrames);
+    this.pauseActiveMotion();
+    this.alignLeftFootButton.disabled = true;
+    this.alignRightFootButton.disabled = true;
+    const activeButton =
+      side === 'left' ? this.alignLeftFootButton : this.alignRightFootButton;
+    const originalText = activeButton.textContent;
+    activeButton.textContent = 'Aligning…';
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    try {
+      const result = this.footGroundAlignmentService.align(
+        this.lastLoadResult.robot,
+        side,
+        sole,
+        this.sceneController.getGroundHeight(),
+      );
+      if (!result.success) {
+        throw new Error(result.reason ?? `Could not align the ${side} foot.`);
+      }
+      const currentFrame = this.motionPlayer.getCurrentFrame();
+      this.keyframes.add(currentFrame);
+      for (const [jointName, value] of Object.entries(result.jointValues)) {
+        this.motionPlayer.setJointValue(jointName, value);
+      }
+      for (const jointName of Object.keys(result.jointValues)) {
+        this.motionPlayer.smoothJoint(
+          jointName,
+          currentFrame,
+          smoothFrames,
+          smoothFrames,
+          Array.from(this.keyframes),
+        );
+      }
+      this.motionPlayer.seek(currentFrame);
+      this.updateKeyframeMarkers();
+      if (this.showCenterOfMass) {
+        this.rebuildCenterOfMassTrail();
+        this.updateCenterOfMassVisualization();
+      }
+      this.updateGroundContactVisualization();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      activeButton.textContent = originalText;
+      this.syncVisibilityButtons();
+    }
+  }
+
   private readonly onModePropsSmplRenderClick = (): void => {
     this.toggleSmplDisplayMode();
   };
@@ -1395,6 +1472,10 @@ export class AppController {
     this.viewModeButton = requireElement<HTMLButtonElement>('view-mode-btn');
     this.centerOfMassButton = requireElement<HTMLButtonElement>('center-of-mass-btn');
     this.groundContactsButton = requireElement<HTMLButtonElement>('ground-contacts-btn');
+    this.alignLeftFootButton = requireElement<HTMLButtonElement>('align-left-foot-btn');
+    this.alignRightFootButton = requireElement<HTMLButtonElement>('align-right-foot-btn');
+    this.footAlignSmoothFramesInput =
+      requireElement<HTMLInputElement>('foot-align-smooth-frames');
     this.modePropsPanel = requireElement<HTMLElement>('mode-props-panel');
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
@@ -1462,6 +1543,7 @@ export class AppController {
     this.motionPlayer = new G1MotionPlayer();
     this.centerOfMassService = new CenterOfMassService();
     this.groundContactService = new GroundContactService();
+    this.footGroundAlignmentService = new FootGroundAlignmentService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
@@ -1555,6 +1637,8 @@ export class AppController {
     this.viewModeButton.addEventListener('click', this.onViewModeClick);
     this.centerOfMassButton.addEventListener('click', this.onCenterOfMassClick);
     this.groundContactsButton.addEventListener('click', this.onGroundContactsClick);
+    this.alignLeftFootButton.addEventListener('click', this.onAlignLeftFootClick);
+    this.alignRightFootButton.addEventListener('click', this.onAlignRightFootClick);
     this.urdfSelect.addEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.addEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
@@ -1643,6 +1727,8 @@ export class AppController {
     this.viewModeButton.removeEventListener('click', this.onViewModeClick);
     this.centerOfMassButton.removeEventListener('click', this.onCenterOfMassClick);
     this.groundContactsButton.removeEventListener('click', this.onGroundContactsClick);
+    this.alignLeftFootButton.removeEventListener('click', this.onAlignLeftFootClick);
+    this.alignRightFootButton.removeEventListener('click', this.onAlignRightFootClick);
     this.urdfSelect.removeEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.removeEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.removeEventListener('click', this.onMotionPlayClick);
@@ -4231,6 +4317,11 @@ export class AppController {
       ? 'Green probes touch the ground; red probes are above it.'
       : 'Ground contacts require a URDF motion with foot geometry.';
     this.groundContactsButton.classList.toggle('active', this.showGroundContacts);
+    const canAlignFeet =
+      canShowGroundContacts && isUrdfMotionKind(this.currentMotionKind);
+    this.alignLeftFootButton.disabled = !canAlignFeet;
+    this.alignRightFootButton.disabled = !canAlignFeet;
+    this.footAlignSmoothFramesInput.disabled = !canAlignFeet;
   }
 
   private syncMotionControls(): void {

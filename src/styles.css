@@ -866,6 +866,25 @@ body {
   flex-wrap: wrap;
 }
 
+.foot-align-controls {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.foot-align-controls input {
+  width: 58px;
+  padding: 0.32rem 0.4rem;
+  border: 1px solid rgba(146, 205, 236, 0.35);
+  border-radius: 7px;
+  background: rgba(7, 22, 32, 0.8);
+  color: var(--text-main);
+}
+
 .motion-controls__fps {
   margin-top: 0.52rem;
   display: grid;
