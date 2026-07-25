@@ -35,6 +35,10 @@ import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadSer
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
 import { UrdfLoadService } from '../io/urdf/UrdfLoadService';
 import { BvhMotionPlayer } from '../motion/BvhMotionPlayer';
+import {
+  CenterOfMassService,
+  type CenterOfMassPoint,
+} from '../motion/CenterOfMassService';
 import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlayer';
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
 import { SmplMotionPlayer } from '../motion/SmplMotionPlayer';
@@ -924,6 +928,7 @@ export class AppController {
   private readonly smplMotionService: SmplMotionService;
   private readonly objLoadService: ObjLoadService;
   private readonly motionPlayer: G1MotionPlayer;
+  private readonly centerOfMassService: CenterOfMassService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -940,6 +945,7 @@ export class AppController {
   private readonly showVisualButton: HTMLButtonElement;
   private readonly showCollisionButton: HTMLButtonElement;
   private readonly viewModeButton: HTMLButtonElement;
+  private readonly centerOfMassButton: HTMLButtonElement;
   private readonly modePropsPanel: HTMLElement;
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
@@ -1047,6 +1053,8 @@ export class AppController {
   private isMotionPlaying = false;
   private bvhLinearUnit: BvhLinearUnit = 'm';
   private viewMode: ViewMode = 'root_lock';
+  private showCenterOfMass = false;
+  private centerOfMassTrail: Array<CenterOfMassPoint & { frameIndex: number }> = [];
   private smplDisplayMode: 'mesh' | 'skeleton' = 'mesh';
   private currentSmplDisplayNodes:
     | {
@@ -1198,6 +1206,16 @@ export class AppController {
 
   private readonly onViewModeClick = (): void => {
     this.toggleViewMode();
+  };
+
+  private readonly onCenterOfMassClick = (): void => {
+    this.showCenterOfMass = !this.showCenterOfMass;
+    this.sceneController.setCenterOfMassVisibility(this.showCenterOfMass);
+    if (this.showCenterOfMass) {
+      this.rebuildCenterOfMassTrail();
+      this.updateCenterOfMassVisualization();
+    }
+    this.syncVisibilityButtons();
   };
 
   private readonly onModePropsSmplRenderClick = (): void => {
@@ -1355,6 +1373,7 @@ export class AppController {
     this.showVisualButton = requireElement<HTMLButtonElement>('show-visual-btn');
     this.showCollisionButton = requireElement<HTMLButtonElement>('show-collision-btn');
     this.viewModeButton = requireElement<HTMLButtonElement>('view-mode-btn');
+    this.centerOfMassButton = requireElement<HTMLButtonElement>('center-of-mass-btn');
     this.modePropsPanel = requireElement<HTMLElement>('mode-props-panel');
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
@@ -1402,7 +1421,7 @@ export class AppController {
         this.renderCurrentReadyState();
       }
     };
-    
+
     // 设置关节点击回调
     this.sceneController.onJointClick = (jointName) => {
       console.log('Joint clicked:', jointName);
@@ -1420,11 +1439,13 @@ export class AppController {
     this.smplMotionService = new SmplMotionService();
     this.objLoadService = new ObjLoadService();
     this.motionPlayer = new G1MotionPlayer();
+    this.centerOfMassService = new CenterOfMassService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
       this.motionFrameSnapshot = snapshot;
       this.syncMotionControls();
+      this.updateCenterOfMassVisualization();
       this.sceneController.syncViewToCurrentRobot();
     };
     this.motionPlayer.onPlaybackStateChanged = (isPlaying) => {
@@ -1509,6 +1530,7 @@ export class AppController {
     this.showVisualButton.addEventListener('click', this.onShowVisualClick);
     this.showCollisionButton.addEventListener('click', this.onShowCollisionClick);
     this.viewModeButton.addEventListener('click', this.onViewModeClick);
+    this.centerOfMassButton.addEventListener('click', this.onCenterOfMassClick);
     this.urdfSelect.addEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.addEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
@@ -1595,6 +1617,7 @@ export class AppController {
     this.showVisualButton.removeEventListener('click', this.onShowVisualClick);
     this.showCollisionButton.removeEventListener('click', this.onShowCollisionClick);
     this.viewModeButton.removeEventListener('click', this.onViewModeClick);
+    this.centerOfMassButton.removeEventListener('click', this.onCenterOfMassClick);
     this.urdfSelect.removeEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.removeEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.removeEventListener('click', this.onMotionPlayClick);
@@ -1903,6 +1926,8 @@ export class AppController {
       this.sceneController.setRobot(result.robot);
       this.sceneController.setGeometryVisibility(this.showVisual, this.showCollision);
       this.motionPlayer.attachRobot(result.robot);
+      this.centerOfMassService.attachRobot(result.robot);
+      this.centerOfMassTrail = [];
       this.lastLoadResult = result;
       this.selectedUrdfPath = result.selectedUrdfPath;
       this.selectedModelOptionKey = `urdf:${result.selectedUrdfPath}`;
@@ -1966,6 +1991,11 @@ export class AppController {
     this.motionPlayer.attachRobot(loadedRobotResult.robot);
     const bindingReport = this.motionPlayer.loadClip(clip);
     this.sceneController.syncGroundToCurrentRobot();
+    this.centerOfMassTrail = [];
+    if (this.showCenterOfMass) {
+      this.rebuildCenterOfMassTrail();
+      this.updateCenterOfMassVisualization();
+    }
 
     this.currentMotionClip = clip;
     this.currentBvhMotion = null;
@@ -3168,6 +3198,9 @@ export class AppController {
     this.motionPlayer.pause();
     this.motionPlayer.loadClip(null);
     this.motionPlayer.attachRobot(null);
+    this.centerOfMassService.attachRobot(null);
+    this.centerOfMassTrail = [];
+    this.sceneController.clearCenterOfMass();
     this.bvhMotionPlayer.pause();
     this.bvhMotionPlayer.load(null, null);
     this.smplMotionPlayer.pause();
@@ -3415,7 +3448,7 @@ export class AppController {
       dropHint: this.buildReadyDropHint(),
       warnings: this.collectModelWarnings(result.warnings),
     });
-    
+
     // 显示创建新动作的按钮
     this.showCreateMotionButton();
   }
@@ -3425,7 +3458,7 @@ export class AppController {
     if (document.getElementById('create-motion-btn')) {
       return;
     }
-    
+
     // 在dataset-panel中添加创建动作的按钮
     const datasetPanel = document.getElementById('dataset-panel');
     if (datasetPanel) {
@@ -3462,7 +3495,7 @@ export class AppController {
     dialog.style.minWidth = '300px';
     dialog.style.boxShadow = '0 25px 45px rgba(1, 7, 10, 0.45)';
     dialog.style.backdropFilter = 'blur(8px) saturate(120%)';
-    
+
     // 对话框标题
     const title = document.createElement('h3');
     title.textContent = 'Create New Motion';
@@ -3470,12 +3503,12 @@ export class AppController {
     title.style.marginTop = '0';
     title.style.marginBottom = '1.5rem';
     dialog.appendChild(title);
-    
+
     // 表单
     const form = document.createElement('form');
     form.style.display = 'grid';
     form.style.gap = '1rem';
-    
+
     // 导出格式选择
     const formatDiv = document.createElement('div');
     const formatLabel = document.createElement('label');
@@ -3501,7 +3534,7 @@ export class AppController {
     });
     formatDiv.appendChild(formatSelect);
     form.appendChild(formatDiv);
-    
+
     // FPS设置
     const fpsDiv = document.createElement('div');
     const fpsLabel = document.createElement('label');
@@ -3524,7 +3557,7 @@ export class AppController {
     fpsInput.style.font = 'inherit';
     fpsDiv.appendChild(fpsInput);
     form.appendChild(fpsDiv);
-    
+
     // 总帧数设置
     const frameCountDiv = document.createElement('div');
     const frameCountLabel = document.createElement('label');
@@ -3547,13 +3580,13 @@ export class AppController {
     frameCountInput.style.font = 'inherit';
     frameCountDiv.appendChild(frameCountInput);
     form.appendChild(frameCountDiv);
-    
+
     // 按钮
     const buttonsDiv = document.createElement('div');
     buttonsDiv.style.display = 'flex';
     buttonsDiv.style.gap = '0.5rem';
     buttonsDiv.style.justifyContent = 'flex-end';
-    
+
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
     cancelButton.textContent = 'Cancel';
@@ -3563,7 +3596,7 @@ export class AppController {
       overlay.remove();
     });
     buttonsDiv.appendChild(cancelButton);
-    
+
     const createButton = document.createElement('button');
     createButton.type = 'button';
     createButton.textContent = 'Create';
@@ -3577,10 +3610,10 @@ export class AppController {
       overlay.remove();
     });
     buttonsDiv.appendChild(createButton);
-    
+
     form.appendChild(buttonsDiv);
     dialog.appendChild(form);
-    
+
     // 遮罩
     const overlay = document.createElement('div');
     overlay.id = 'create-motion-overlay';
@@ -3595,7 +3628,7 @@ export class AppController {
       dialog.remove();
       overlay.remove();
     });
-    
+
     document.body.appendChild(overlay);
     document.body.appendChild(dialog);
   }
@@ -3604,14 +3637,14 @@ export class AppController {
     if (!this.lastLoadResult) {
       return;
     }
-    
+
     const motionSchema = this.lastLoadResult.motionSchema;
     const jointCount = motionSchema.jointNames.length;
     const stride = DEFAULT_ROOT_COMPONENT_COUNT + jointCount;
-    
+
     // 创建一个新的动作片段，初始化为默认值
     const data = new Float32Array(frameCount * stride);
-    
+
     // 初始化所有帧为默认值（root位置为0,0,0，旋转为单位四元数，关节角度为0）
     for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
       const baseIndex = frameIndex * stride;
@@ -3629,7 +3662,7 @@ export class AppController {
         data[baseIndex + DEFAULT_ROOT_COMPONENT_COUNT + jointIndex] = 0;
       }
     }
-    
+
     const clip: MotionClip = {
       name: 'New Motion',
       sourcePath: 'new_motion',
@@ -3641,7 +3674,7 @@ export class AppController {
       sourceColumnCount: stride,
       data,
     };
-    
+
     // 应用新创建的动作
     this.applyLoadedUrdfMotion(
       this.lastLoadResult,
@@ -3650,7 +3683,7 @@ export class AppController {
       'new_motion',
       []
     );
-    
+
     // 显示关节控制面板
     this.showJointPanel();
   }
@@ -4075,6 +4108,55 @@ export class AppController {
     this.motionFpsInput.value = this.formatMotionFpsValue(fps);
   }
 
+  private rebuildCenterOfMassTrail(): void {
+    const clip = this.motionPlayer.getClip();
+    if (!clip || !this.lastLoadResult || this.centerOfMassService.getLinkCount() === 0) {
+      this.centerOfMassTrail = [];
+      this.sceneController.setCenterOfMassTrail([]);
+      return;
+    }
+    const trail: Array<CenterOfMassPoint & { frameIndex: number }> = [];
+    const frameStep = Math.max(1, Math.ceil(clip.frameCount / 1_500));
+    this.motionPlayer.sampleClipFrames(
+      clip,
+      (frameIndex, robot) => {
+        const point = this.centerOfMassService.compute(robot);
+        if (point) {
+          trail.push({ ...point, frameIndex });
+        }
+      },
+      frameStep,
+    );
+    this.centerOfMassTrail = trail;
+    this.sceneController.setCenterOfMassTrail(trail);
+    this.updateCenterOfMassTrailProgress(this.motionPlayer.getCurrentFrame());
+  }
+
+  private updateCenterOfMassTrailProgress(frameIndex: number): void {
+    let low = 0;
+    let high = this.centerOfMassTrail.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (this.centerOfMassTrail[middle].frameIndex <= frameIndex) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    this.sceneController.setCenterOfMassTrailProgress(low);
+  }
+
+  private updateCenterOfMassVisualization(): void {
+    if (!this.showCenterOfMass || !this.lastLoadResult || !this.currentMotionClip) {
+      return;
+    }
+    const point = this.centerOfMassService.compute(this.lastLoadResult.robot);
+    if (point) {
+      this.sceneController.updateCenterOfMass(point);
+      this.updateCenterOfMassTrailProgress(this.motionPlayer.getCurrentFrame());
+    }
+  }
+
   private syncVisibilityButtons(): void {
     const hasUrdfModel = Boolean(this.lastLoadResult);
     this.urdfVisualControls.hidden = !hasUrdfModel;
@@ -4085,6 +4167,18 @@ export class AppController {
     const isRootLock = this.viewMode === 'root_lock';
     this.viewModeButton.textContent = isRootLock ? 'View: Root Lock' : 'View: Free';
     this.viewModeButton.classList.toggle('active', isRootLock);
+    const canShowCenterOfMass =
+      hasUrdfModel &&
+      Boolean(this.currentMotionClip) &&
+      this.centerOfMassService.getLinkCount() > 0;
+    this.centerOfMassButton.disabled = !canShowCenterOfMass;
+    this.centerOfMassButton.textContent = this.showCenterOfMass ? 'CoM: On' : 'CoM: Off';
+    this.centerOfMassButton.title = canShowCenterOfMass
+      ? `${this.centerOfMassService.getLinkCount()} inertial links · ${this.centerOfMassService
+          .getTotalMass()
+          .toFixed(2)} kg`
+      : 'Center of mass requires a URDF motion with inertial data.';
+    this.centerOfMassButton.classList.toggle('active', this.showCenterOfMass);
   }
 
   private syncMotionControls(): void {
@@ -4684,7 +4778,7 @@ export class AppController {
 
     const currentFrame = this.motionPlayer.getCurrentFrame();
     const keyframeArray = Array.from(this.keyframes).sort((a, b) => a - b);
-    
+
     // 找到当前帧之前的最后一个关键帧
     let prevKeyframe = -1;
     for (let i = keyframeArray.length - 1; i >= 0; i--) {
@@ -4693,12 +4787,12 @@ export class AppController {
         break;
       }
     }
-    
+
     // 如果没有找到前一个关键帧，循环到最后一个关键帧
     if (prevKeyframe === -1 && keyframeArray.length > 0) {
       prevKeyframe = keyframeArray[keyframeArray.length - 1];
     }
-    
+
     if (prevKeyframe !== -1) {
       this.motionPlayer.seek(prevKeyframe);
     }
@@ -4711,7 +4805,7 @@ export class AppController {
 
     const currentFrame = this.motionPlayer.getCurrentFrame();
     const keyframeArray = Array.from(this.keyframes).sort((a, b) => a - b);
-    
+
     // 找到当前帧之后的第一个关键帧
     let nextKeyframe = -1;
     for (const frame of keyframeArray) {
@@ -4720,12 +4814,12 @@ export class AppController {
         break;
       }
     }
-    
+
     // 如果没有找到下一个关键帧，循环到第一个关键帧
     if (nextKeyframe === -1 && keyframeArray.length > 0) {
       nextKeyframe = keyframeArray[0];
     }
-    
+
     if (nextKeyframe !== -1) {
       this.motionPlayer.seek(nextKeyframe);
     }
@@ -4758,13 +4852,13 @@ export class AppController {
     // 计算进度条的实际宽度，确保关键帧标记与进度条对齐
     const sliderElement = document.getElementById('motion-frame-slider');
     const sliderWidth = sliderElement ? sliderElement.offsetWidth : this.keyframeMarkersContainer.offsetWidth;
-    
+
     this.keyframes.forEach(frameIndex => {
       const marker = document.createElement('div');
       marker.className = 'motion-timeline__keyframe-marker';
       marker.style.position = 'absolute';
       marker.style.bottom = '0';
-      
+
       // 计算精确的位置，确保与进度条滑块对齐
       const maxFrame = Math.max(frameCount - 1, 0);
       const positionPercentage = maxFrame > 0 ? (frameIndex / maxFrame) * 100 : 0;
@@ -5394,7 +5488,7 @@ export class AppController {
   private readonly onExportMotionClick = (): void => {
     console.log('Export button clicked!');
     console.log('Current motion kind:', this.currentMotionKind);
-    
+
     if (!isUrdfMotionKind(this.currentMotionKind)) {
       console.log('Not a URDF motion kind');
       return;
@@ -5402,7 +5496,7 @@ export class AppController {
 
     const clip = this.motionPlayer.getClip();
     console.log('Clip:', clip);
-    
+
     if (!clip) {
       console.log('No clip available');
       return;
@@ -5860,7 +5954,7 @@ export class AppController {
       // 计算机器人边界框
       const robot = this.lastLoadResult.robot;
       console.log('Robot found:', robot);
-      
+
       const box = this.sceneController['computeRobotBounds'](robot);
       if (!box) {
         console.log('No bounding box found');
@@ -5869,16 +5963,16 @@ export class AppController {
 
       console.log('Bounding box min:', box.min);
       console.log('Bounding box max:', box.max);
-      
+
       // 获取地面位置（机器人最低点）
       const groundPosition = box.min.y;
       console.log('Ground position (box.min.y):', groundPosition);
-      
+
       // 计算root关节的位置
       // 首先尝试从robot对象中获取root关节
       const robotAny = robot as any;
       let rootYPosition = 0;
-      
+
       // 尝试不同的方式获取root关节位置
       if (robotAny.joints && robotAny.joints['floating_base_joint']) {
         const rootJoint = robotAny.joints['floating_base_joint'];
@@ -5898,11 +5992,11 @@ export class AppController {
         rootYPosition = center.y;
         console.log('Root joint position from bounding box center:', rootYPosition);
       }
-      
+
       // 计算root关节到地面的高度
       const rootHeight = rootYPosition - groundPosition;
       console.log('Calculated root height:', rootHeight);
-      
+
       return rootHeight;
     } catch (error) {
       console.error('Error calculating robot height:', error);
@@ -7175,12 +7269,12 @@ export class AppController {
 
   private smoothRoot(): void {
     const currentFrame = this.motionPlayer.getCurrentFrame();
-    
+
     // 找到相邻的关键帧
     const keyframeArray = Array.from(this.keyframes).sort((a, b) => a - b);
     let prevKeyframe = -1;
     let nextKeyframe = -1;
-    
+
     for (let i = 0; i < keyframeArray.length; i++) {
       if (keyframeArray[i] < currentFrame) {
         prevKeyframe = keyframeArray[i];
@@ -7195,32 +7289,32 @@ export class AppController {
         return;
       }
     }
-    
+
     // 获取用户指定的范围
     const beforeSlider = this.jointList.querySelector<HTMLInputElement>('.smooth-slider[data-root-control="smooth"][data-direction="before"]');
     const afterSlider = this.jointList.querySelector<HTMLInputElement>('.smooth-slider[data-root-control="smooth"][data-direction="after"]');
-    
+
     const userRangeBefore = beforeSlider ? parseInt(beforeSlider.value, 10) : 5;
     const userRangeAfter = afterSlider ? parseInt(afterSlider.value, 10) : 5;
-    
+
     // 计算用户指定的区间
     const userStart = Math.max(0, currentFrame - userRangeBefore);
     const userEnd = Math.min(this.motionPlayer.getFrameCount() - 1, currentFrame + userRangeAfter);
-    
+
     // 计算关键帧之间的区间
     const keyframeStart = prevKeyframe !== -1 ? prevKeyframe : userStart;
     const keyframeEnd = nextKeyframe !== -1 ? nextKeyframe : userEnd;
-    
+
     // 确定平滑范围：选择最小的区间
     let startFrame = Math.max(userStart, keyframeStart);
     let endFrame = Math.min(userEnd, keyframeEnd);
-    
+
     console.log('Smoothing root between frames:', startFrame, 'and', endFrame);
-    
+
     // 对root位置和旋转进行平滑
     this.smoothRootPosition(startFrame, currentFrame, endFrame);
     this.smoothRootRotation(startFrame, currentFrame, endFrame);
-    
+
     this.setState('playing', {
       detail: 'Root motion smoothed successfully!',
     });
@@ -7230,44 +7324,44 @@ export class AppController {
     if (!this.motionPlayer.getClip()) {
       return;
     }
-    
+
     // 保存当前帧的位置值
     const currentPos = this.motionPlayer.getRootPosition();
-    
+
     // 获取开始帧和结束帧的位置
     const originalFrame = this.motionPlayer.getCurrentFrame();
-    
+
     this.motionPlayer.seek(startFrame);
     const startPos = this.motionPlayer.getRootPosition();
-    
+
     this.motionPlayer.seek(endFrame);
     const endPos = this.motionPlayer.getRootPosition();
-    
+
     // 恢复到当前帧
     this.motionPlayer.seek(currentFrame);
-    
+
     // 平滑开始帧到当前帧
     for (let frame = startFrame + 1; frame < currentFrame; frame++) {
       const t = (frame - startFrame) / (currentFrame - startFrame);
       const x = startPos.x + (currentPos.x - startPos.x) * t;
       const y = startPos.y + (currentPos.y - startPos.y) * t;
       const z = startPos.z + (currentPos.z - startPos.z) * t;
-      
+
       this.motionPlayer.seek(frame);
       this.motionPlayer.setRootPosition(x, y, z);
     }
-    
+
     // 平滑当前帧到结束帧
     for (let frame = currentFrame + 1; frame < endFrame; frame++) {
       const t = (frame - currentFrame) / (endFrame - currentFrame);
       const x = currentPos.x + (endPos.x - currentPos.x) * t;
       const y = currentPos.y + (endPos.y - currentPos.y) * t;
       const z = currentPos.z + (endPos.z - currentPos.z) * t;
-      
+
       this.motionPlayer.seek(frame);
       this.motionPlayer.setRootPosition(x, y, z);
     }
-    
+
     // 恢复到原始帧
     this.motionPlayer.seek(originalFrame);
   }
@@ -7277,7 +7371,7 @@ export class AppController {
     const keyframeArray = Array.from(this.keyframes).sort((a, b) => a - b);
     let prevKeyframe = -1;
     let nextKeyframe = -1;
-    
+
     for (let i = 0; i < keyframeArray.length; i++) {
       if (keyframeArray[i] < currentFrame) {
         prevKeyframe = keyframeArray[i];
@@ -7295,21 +7389,21 @@ export class AppController {
         break;
       }
     }
-    
+
     // 计算用户指定的区间
     const userStart = Math.max(0, currentFrame - framesBefore);
     const userEnd = Math.min(this.motionPlayer.getFrameCount() - 1, currentFrame + framesAfter);
-    
+
     // 计算关键帧之间的区间
     const keyframeStart = prevKeyframe !== -1 ? prevKeyframe : userStart;
     const keyframeEnd = nextKeyframe !== -1 ? nextKeyframe : userEnd;
-    
+
     // 确定平滑范围：选择最小的区间
     let startFrame = Math.max(userStart, keyframeStart);
     let endFrame = Math.min(userEnd, keyframeEnd);
-    
+
     console.log(`Smoothing root ${axis} between frames:`, startFrame, 'and', endFrame);
-    
+
     // 四元数转欧拉角
     function quaternionToEuler(x: number, y: number, z: number, w: number): { roll: number; pitch: number; yaw: number } {
       const roll = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
@@ -7334,36 +7428,36 @@ export class AppController {
         z: sy * cp * cr - cy * sp * sr
       };
     }
-    
+
     // 保存当前帧的值
     let currentValue: number;
     let startValue: number;
     let endValue: number;
-    
+
     const originalFrame = this.motionPlayer.getCurrentFrame();
-    
+
     if (axis === 'x' || axis === 'y' || axis === 'z') {
       // 位置轴
       const currentPos = this.motionPlayer.getRootPosition();
       currentValue = currentPos[axis as keyof typeof currentPos];
-      
+
       // 获取开始帧和结束帧的值
       this.motionPlayer.seek(startFrame);
       const startPos = this.motionPlayer.getRootPosition();
       startValue = startPos[axis as keyof typeof startPos];
-      
+
       this.motionPlayer.seek(endFrame);
       const endPos = this.motionPlayer.getRootPosition();
       endValue = endPos[axis as keyof typeof endPos];
-      
+
       // 恢复到当前帧
       this.motionPlayer.seek(currentFrame);
-      
+
       // 平滑开始帧到当前帧
       for (let frame = startFrame + 1; frame < currentFrame; frame++) {
         const t = (frame - startFrame) / (currentFrame - startFrame);
         const value = startValue + (currentValue - startValue) * t;
-        
+
         this.motionPlayer.seek(frame);
         const currentPos = this.motionPlayer.getRootPosition();
         if (axis === 'x') {
@@ -7374,12 +7468,12 @@ export class AppController {
           this.motionPlayer.setRootPosition(currentPos.x, currentPos.y, value);
         }
       }
-      
+
       // 平滑当前帧到结束帧
       for (let frame = currentFrame + 1; frame < endFrame; frame++) {
         const t = (frame - currentFrame) / (endFrame - currentFrame);
         const value = currentValue + (endValue - currentValue) * t;
-        
+
         this.motionPlayer.seek(frame);
         const currentPos = this.motionPlayer.getRootPosition();
         if (axis === 'x') {
@@ -7395,26 +7489,26 @@ export class AppController {
       const currentRot = this.motionPlayer.getRootRotation();
       const currentEuler = quaternionToEuler(currentRot.x, currentRot.y, currentRot.z, currentRot.w);
       currentValue = currentEuler[axis as keyof typeof currentEuler];
-      
+
       // 获取开始帧和结束帧的值
       this.motionPlayer.seek(startFrame);
       const startRot = this.motionPlayer.getRootRotation();
       const startEuler = quaternionToEuler(startRot.x, startRot.y, startRot.z, startRot.w);
       startValue = startEuler[axis as keyof typeof startEuler];
-      
+
       this.motionPlayer.seek(endFrame);
       const endRot = this.motionPlayer.getRootRotation();
       const endEuler = quaternionToEuler(endRot.x, endRot.y, endRot.z, endRot.w);
       endValue = endEuler[axis as keyof typeof endEuler];
-      
+
       // 恢复到当前帧
       this.motionPlayer.seek(currentFrame);
-      
+
       // 平滑开始帧到当前帧
       for (let frame = startFrame + 1; frame < currentFrame; frame++) {
         const t = (frame - startFrame) / (currentFrame - startFrame);
         const value = startValue + (currentValue - startValue) * t;
-        
+
         this.motionPlayer.seek(frame);
         const currentRot = this.motionPlayer.getRootRotation();
         const currentEuler = quaternionToEuler(currentRot.x, currentRot.y, currentRot.z, currentRot.w);
@@ -7428,12 +7522,12 @@ export class AppController {
         }
         this.motionPlayer.setRootRotation(quat.x, quat.y, quat.z, quat.w);
       }
-      
+
       // 平滑当前帧到结束帧
       for (let frame = currentFrame + 1; frame < endFrame; frame++) {
         const t = (frame - currentFrame) / (endFrame - currentFrame);
         const value = currentValue + (endValue - currentValue) * t;
-        
+
         this.motionPlayer.seek(frame);
         const currentRot = this.motionPlayer.getRootRotation();
         const currentEuler = quaternionToEuler(currentRot.x, currentRot.y, currentRot.z, currentRot.w);
@@ -7448,7 +7542,7 @@ export class AppController {
         this.motionPlayer.setRootRotation(quat.x, quat.y, quat.z, quat.w);
       }
     }
-    
+
     // 恢复到原始帧
     this.motionPlayer.seek(originalFrame);
   }
@@ -7457,7 +7551,7 @@ export class AppController {
     if (!this.motionPlayer.getClip()) {
       return;
     }
-    
+
     // 四元数转欧拉角
     function quaternionToEuler(x: number, y: number, z: number, w: number): { roll: number; pitch: number; yaw: number } {
       const roll = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
@@ -7482,51 +7576,51 @@ export class AppController {
         z: sy * cp * cr - cy * sp * sr
       };
     }
-    
+
     // 保存当前帧的旋转值
     const currentRot = this.motionPlayer.getRootRotation();
     const currentEuler = quaternionToEuler(currentRot.x, currentRot.y, currentRot.z, currentRot.w);
-    
+
     // 获取开始帧和结束帧的旋转
     const originalFrame = this.motionPlayer.getCurrentFrame();
-    
+
     this.motionPlayer.seek(startFrame);
     const startRot = this.motionPlayer.getRootRotation();
     const startEuler = quaternionToEuler(startRot.x, startRot.y, startRot.z, startRot.w);
-    
+
     this.motionPlayer.seek(endFrame);
     const endRot = this.motionPlayer.getRootRotation();
     const endEuler = quaternionToEuler(endRot.x, endRot.y, endRot.z, endRot.w);
-    
+
     // 恢复到当前帧
     this.motionPlayer.seek(currentFrame);
-    
+
     // 平滑开始帧到当前帧
     for (let frame = startFrame + 1; frame < currentFrame; frame++) {
       const t = (frame - startFrame) / (currentFrame - startFrame);
       const roll = startEuler.roll + (currentEuler.roll - startEuler.roll) * t;
       const pitch = startEuler.pitch + (currentEuler.pitch - startEuler.pitch) * t;
       const yaw = startEuler.yaw + (currentEuler.yaw - startEuler.yaw) * t;
-      
+
       const quat = eulerToQuaternion(roll, pitch, yaw);
-      
+
       this.motionPlayer.seek(frame);
       this.motionPlayer.setRootRotation(quat.x, quat.y, quat.z, quat.w);
     }
-    
+
     // 平滑当前帧到结束帧
     for (let frame = currentFrame + 1; frame < endFrame; frame++) {
       const t = (frame - currentFrame) / (endFrame - currentFrame);
       const roll = currentEuler.roll + (endEuler.roll - currentEuler.roll) * t;
       const pitch = currentEuler.pitch + (endEuler.pitch - currentEuler.pitch) * t;
       const yaw = currentEuler.yaw + (endEuler.yaw - currentEuler.yaw) * t;
-      
+
       const quat = eulerToQuaternion(roll, pitch, yaw);
-      
+
       this.motionPlayer.seek(frame);
       this.motionPlayer.setRootRotation(quat.x, quat.y, quat.z, quat.w);
     }
-    
+
     // 恢复到原始帧
     this.motionPlayer.seek(originalFrame);
   }
@@ -7575,13 +7669,13 @@ export class AppController {
     // 更新普通关节的值
     const jointInputs = this.jointList.querySelectorAll<HTMLInputElement>('.joint-input:not([data-root-control])');
     const jointSliders = this.jointList.querySelectorAll<HTMLInputElement>('.joint-slider:not([data-root-control])');
-    
+
     jointInputs.forEach((input, index) => {
       if (index < jointValues.length) {
         input.value = jointValues[index].toFixed(4);
       }
     });
-    
+
     jointSliders.forEach((slider, index) => {
       if (index < jointValues.length) {
         slider.value = jointValues[index].toString();

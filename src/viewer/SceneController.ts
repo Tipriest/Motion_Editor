@@ -1,22 +1,28 @@
 import {
   ACESFilmicToneMapping,
   Box3,
+  BufferGeometry,
   Color,
   DirectionalLight,
   Group,
   GridHelper,
   HemisphereLight,
+  Line,
+  LineBasicMaterial,
   Mesh,
+  MeshBasicMaterial,
   MeshPhongMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
   PlaneGeometry,
   PMREMGenerator,
   Raycaster,
+  RingGeometry,
   SRGBColorSpace,
   Scene,
   ShadowMaterial,
   Sphere,
+  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -159,6 +165,10 @@ export class SceneController {
   private readonly referenceGrid: any;
   private readonly pmremGenerator: any;
   private readonly environmentMapTarget: any;
+  private readonly centerOfMassRoot: any;
+  private readonly centerOfMassMarker: any;
+  private readonly centerOfMassProjection: any;
+  private readonly centerOfMassTrail: any;
   private currentRobot: UrdfRobotLike | null = null;
   private visualNodes: any[] = [];
   private collisionNodes: any[] = [];
@@ -166,15 +176,17 @@ export class SceneController {
   private viewMode: ViewMode = 'root_lock';
   private showVisual = true;
   private showCollision = false;
+  private showCenterOfMass = false;
+  private hasCenterOfMass = false;
   private currentVisualProfile: SceneVisualProfile = 'default';
   private animationFrameId = 0;
   private readonly tempTrackTarget = new Vector3();
   private readonly tempCameraOffset = new Vector3();
-  
+
   // 用于射线检测的对象
   private readonly raycaster = new Raycaster();
   private readonly mouse = new Vector2();
-  
+
   // 用于存储当前悬停的关节
   private hoveredJointName: string | null = null;
 
@@ -218,7 +230,7 @@ export class SceneController {
       const rect = this.canvas.getBoundingClientRect();
       this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      
+
       // 处理鼠标点击
       this.handleMouseClick();
     });
@@ -270,6 +282,43 @@ export class SceneController {
     this.modelRoot = new Group();
     this.modelRoot.name = 'model-root';
     this.scene.add(this.modelRoot);
+
+    this.centerOfMassRoot = new Group();
+    this.centerOfMassRoot.name = 'center-of-mass-overlay';
+    this.centerOfMassMarker = new Mesh(
+      new SphereGeometry(0.045, 18, 12),
+      new MeshBasicMaterial({ color: '#ffcf4a', depthTest: false }),
+    );
+    this.centerOfMassMarker.renderOrder = 20;
+    this.centerOfMassProjection = new Mesh(
+      new RingGeometry(0.055, 0.085, 24),
+      new MeshBasicMaterial({
+        color: '#ffcf4a',
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    );
+    this.centerOfMassProjection.rotation.x = -HALF_PI;
+    this.centerOfMassProjection.renderOrder = 19;
+    this.centerOfMassTrail = new Line(
+      new BufferGeometry(),
+      new LineBasicMaterial({
+        color: '#54d8ff',
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    );
+    this.centerOfMassTrail.frustumCulled = false;
+    this.centerOfMassTrail.renderOrder = 18;
+    this.centerOfMassRoot.add(
+      this.centerOfMassTrail,
+      this.centerOfMassProjection,
+      this.centerOfMassMarker,
+    );
+    this.centerOfMassRoot.visible = false;
+    this.scene.add(this.centerOfMassRoot);
 
     this.groundPlane = new Mesh(
       new PlaneGeometry(GRID_BASE_SIZE, GRID_BASE_SIZE),
@@ -431,6 +480,7 @@ export class SceneController {
   }
 
   clearRobot(): void {
+    this.clearCenterOfMass();
     if (!this.currentRobot) {
       return;
     }
@@ -445,6 +495,50 @@ export class SceneController {
     this.groundPlane.scale.setScalar(1);
     this.groundPlane.position.y = 0;
     this.emitWarning(null);
+  }
+
+  setCenterOfMassVisibility(visible: boolean): void {
+    this.showCenterOfMass = visible;
+    this.centerOfMassRoot.visible = visible && this.hasCenterOfMass;
+  }
+
+  updateCenterOfMass(
+    point: { x: number; y: number; z: number },
+  ): void {
+    this.hasCenterOfMass = true;
+    this.centerOfMassMarker.position.set(point.x, point.y, point.z);
+    this.centerOfMassProjection.position.set(
+      point.x,
+      this.groundPlane.position.y + 0.004,
+      point.z,
+    );
+    this.centerOfMassRoot.visible = this.showCenterOfMass;
+  }
+
+  setCenterOfMassTrail(
+    trail: readonly { x: number; y: number; z: number }[],
+  ): void {
+    this.centerOfMassTrail.geometry?.dispose?.();
+    this.centerOfMassTrail.geometry = new BufferGeometry().setFromPoints(
+      trail.map((item) => new Vector3(item.x, item.y, item.z)),
+    );
+    this.centerOfMassTrail.geometry.setDrawRange(0, 0);
+  }
+
+  setCenterOfMassTrailProgress(visiblePointCount: number): void {
+    const position = this.centerOfMassTrail.geometry?.getAttribute?.('position');
+    const pointCount = position?.count ?? 0;
+    this.centerOfMassTrail.geometry?.setDrawRange?.(
+      0,
+      Math.max(0, Math.min(pointCount, Math.floor(visiblePointCount))),
+    );
+  }
+
+  clearCenterOfMass(): void {
+    this.hasCenterOfMass = false;
+    this.centerOfMassRoot.visible = false;
+    this.centerOfMassTrail.geometry?.dispose?.();
+    this.centerOfMassTrail.geometry = new BufferGeometry();
   }
 
   frameRobot(robot: UrdfRobotLike | null = this.currentRobot): any | null {
@@ -586,6 +680,12 @@ export class SceneController {
 
     this.groundPlane.geometry?.dispose?.();
     disposeMaterial(this.groundPlane.material);
+    this.centerOfMassMarker.geometry?.dispose?.();
+    disposeMaterial(this.centerOfMassMarker.material);
+    this.centerOfMassProjection.geometry?.dispose?.();
+    disposeMaterial(this.centerOfMassProjection.material);
+    this.centerOfMassTrail.geometry?.dispose?.();
+    disposeMaterial(this.centerOfMassTrail.material);
 
     this.environmentMapTarget?.dispose?.();
     this.pmremGenerator?.dispose?.();
@@ -715,7 +815,7 @@ export class SceneController {
     while (current) {
       for (const jointName in robotAny.joints) {
         const joint = robotAny.joints[jointName];
-        
+
         // 尝试多种方式查找关节对应的链接
         let link = null;
         if (joint.link) {
@@ -737,7 +837,7 @@ export class SceneController {
     // 方式2: 遍历所有关节，查找包含该对象的关节
     for (const jointName in robotAny.joints) {
       const joint = robotAny.joints[jointName];
-      
+
       // 尝试多种方式查找关节对应的链接
       let link = null;
       if (joint.link) {
@@ -967,10 +1067,10 @@ export class SceneController {
     if (robotAny.joints && robotAny.joints[jointName]) {
       const joint = robotAny.joints[jointName];
       console.log('Found joint:', jointName);
-      
+
       // 尝试多种方式查找关节对应的链接
       let link = null;
-      
+
       // 方式1: 直接访问link属性
       if (joint.link) {
         link = joint.link;
@@ -991,10 +1091,10 @@ export class SceneController {
         console.log('Joint has no link, childLink, or children, trying joint itself');
         link = joint;
       }
-      
+
       if (link) {
         let meshFound = false;
-        
+
         // 只处理当前链接的直接子网格，不递归遍历所有子节点
         // 这样可以避免高亮后续的关节链接
         link.children.forEach((child: any) => {
@@ -1017,10 +1117,10 @@ export class SceneController {
             });
           }
         });
-        
+
         if (!meshFound) {
           console.log('No direct meshes found in link');
-          
+
           // 如果当前链接没有直接网格，尝试查找第一个包含网格的子节点
           // 但只递归一层，避免高亮太多
           const findFirstMesh = (node: any): boolean => {
@@ -1051,7 +1151,7 @@ export class SceneController {
             }
             return false;
           };
-          
+
           findFirstMesh(link);
         }
       } else {

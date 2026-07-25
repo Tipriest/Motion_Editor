@@ -319,6 +319,7 @@ export class G1MotionPlayer {
   sampleClipFrames(
     clip: MotionClip,
     visitor: (frameIndex: number, robot: UrdfRobotLike) => void,
+    frameStep = 1,
   ): void {
     if (!this.robot) {
       throw new Error('A URDF robot must be attached before sampling motion frames.');
@@ -344,10 +345,23 @@ export class G1MotionPlayer {
         );
       }
 
-      for (let frameIndex = 0; frameIndex < clip.frameCount; frameIndex += 1) {
+      const safeFrameStep = Math.max(1, Math.floor(frameStep));
+      let lastSampledFrame = -1;
+      for (
+        let frameIndex = 0;
+        frameIndex < clip.frameCount;
+        frameIndex += safeFrameStep
+      ) {
         this.seek(frameIndex);
         this.robot.updateMatrixWorld?.(true);
         visitor(frameIndex, this.robot);
+        lastSampledFrame = frameIndex;
+      }
+      const finalFrame = clip.frameCount - 1;
+      if (finalFrame >= 0 && lastSampledFrame !== finalFrame) {
+        this.seek(finalFrame);
+        this.robot.updateMatrixWorld?.(true);
+        visitor(finalFrame, this.robot);
       }
     } finally {
       this.loadClip(originalClip);
@@ -386,7 +400,7 @@ export class G1MotionPlayer {
         for (let i = 0; i < oldFrameCount * stride; i++) {
           newData[i] = oldData[i];
         }
-        
+
         const lastFrameData = oldData.slice((oldFrameCount - 1) * stride, oldFrameCount * stride);
         for (let i = oldFrameCount; i < newFrameCount; i++) {
           for (let j = 0; j < stride; j++) {
@@ -401,11 +415,11 @@ export class G1MotionPlayer {
             newData[i * stride + j] = firstFrameData[j];
           }
         }
-        
+
         for (let i = 0; i < oldFrameCount * stride; i++) {
           newData[(newFrameCount - oldFrameCount) * stride + i] = oldData[i];
         }
-        
+
         // 调整当前帧位置
         this.currentFrame += (newFrameCount - oldFrameCount);
       }
@@ -459,7 +473,7 @@ export class G1MotionPlayer {
     // Find adjacent keyframes
     let prevKeyframe = -1;
     let nextKeyframe = -1;
-    
+
     if (keyframes && keyframes.length > 0) {
       const sortedKeyframes = [...keyframes].sort((a, b) => a - b);
       for (let i = 0; i < sortedKeyframes.length; i++) {
@@ -484,11 +498,11 @@ export class G1MotionPlayer {
     // Calculate user-specified range
     const userStart = Math.max(0, currentFrame - framesBefore);
     const userEnd = Math.min(frameCount - 1, currentFrame + framesAfter);
-    
+
     // Calculate keyframe range
     const keyframeStart = prevKeyframe !== -1 ? prevKeyframe : userStart;
     const keyframeEnd = nextKeyframe !== -1 ? nextKeyframe : userEnd;
-    
+
     // Determine smoothing range: use the smallest interval
     const startFrame = Math.max(userStart, keyframeStart);
     const endFrame = Math.min(userEnd, keyframeEnd);
@@ -549,17 +563,17 @@ export class G1MotionPlayer {
       for (let frame = 0; frame < frameCount; frame++) {
         const base = frame * stride;
         let isKeyframe = false;
-        
+
         // 检查root位置
         if (data[base] !== 0 || data[base + 1] !== 0 || data[base + 2] !== 0) {
           isKeyframe = true;
         }
-        
+
         // 检查root旋转（不是单位四元数）
         if (data[base + 3] !== 0 || data[base + 4] !== 0 || data[base + 5] !== 0 || data[base + 6] !== 1) {
           isKeyframe = true;
         }
-        
+
         // 检查关节角度
         for (let jointIndex = 0; jointIndex < jointCount; jointIndex++) {
           if (data[base + rootComponentCount + jointIndex] !== 0) {
@@ -567,7 +581,7 @@ export class G1MotionPlayer {
             break;
           }
         }
-        
+
         if (isKeyframe) {
           keyframes.push(frame);
         }
@@ -587,7 +601,7 @@ export class G1MotionPlayer {
     for (let i = 0; i < keyframes.length - 1; i++) {
       const startFrame = keyframes[i];
       const endFrame = keyframes[i + 1];
-      
+
       if (endFrame - startFrame <= 1) {
         console.log('Skipping interpolation between adjacent keyframes:', startFrame, 'and', endFrame);
         continue; // 相邻关键帧不需要插值
