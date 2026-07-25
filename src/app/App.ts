@@ -40,6 +40,7 @@ import {
   type CenterOfMassPoint,
 } from '../motion/CenterOfMassService';
 import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlayer';
+import { GroundContactService } from '../motion/GroundContactService';
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
 import { SmplMotionPlayer } from '../motion/SmplMotionPlayer';
 import { SceneController } from '../viewer/SceneController';
@@ -929,6 +930,7 @@ export class AppController {
   private readonly objLoadService: ObjLoadService;
   private readonly motionPlayer: G1MotionPlayer;
   private readonly centerOfMassService: CenterOfMassService;
+  private readonly groundContactService: GroundContactService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -946,6 +948,7 @@ export class AppController {
   private readonly showCollisionButton: HTMLButtonElement;
   private readonly viewModeButton: HTMLButtonElement;
   private readonly centerOfMassButton: HTMLButtonElement;
+  private readonly groundContactsButton: HTMLButtonElement;
   private readonly modePropsPanel: HTMLElement;
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
@@ -1055,6 +1058,8 @@ export class AppController {
   private viewMode: ViewMode = 'root_lock';
   private showCenterOfMass = false;
   private centerOfMassTrail: Array<CenterOfMassPoint & { frameIndex: number }> = [];
+  private showGroundContacts = false;
+  private groundContactCount = 0;
   private smplDisplayMode: 'mesh' | 'skeleton' = 'mesh';
   private currentSmplDisplayNodes:
     | {
@@ -1218,6 +1223,13 @@ export class AppController {
     this.syncVisibilityButtons();
   };
 
+  private readonly onGroundContactsClick = (): void => {
+    this.showGroundContacts = !this.showGroundContacts;
+    this.sceneController.setGroundContactVisibility(this.showGroundContacts);
+    this.updateGroundContactVisualization();
+    this.syncVisibilityButtons();
+  };
+
   private readonly onModePropsSmplRenderClick = (): void => {
     this.toggleSmplDisplayMode();
   };
@@ -1374,6 +1386,7 @@ export class AppController {
     this.showCollisionButton = requireElement<HTMLButtonElement>('show-collision-btn');
     this.viewModeButton = requireElement<HTMLButtonElement>('view-mode-btn');
     this.centerOfMassButton = requireElement<HTMLButtonElement>('center-of-mass-btn');
+    this.groundContactsButton = requireElement<HTMLButtonElement>('ground-contacts-btn');
     this.modePropsPanel = requireElement<HTMLElement>('mode-props-panel');
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
@@ -1440,12 +1453,14 @@ export class AppController {
     this.objLoadService = new ObjLoadService();
     this.motionPlayer = new G1MotionPlayer();
     this.centerOfMassService = new CenterOfMassService();
+    this.groundContactService = new GroundContactService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
       this.motionFrameSnapshot = snapshot;
       this.syncMotionControls();
       this.updateCenterOfMassVisualization();
+      this.updateGroundContactVisualization();
       this.sceneController.syncViewToCurrentRobot();
     };
     this.motionPlayer.onPlaybackStateChanged = (isPlaying) => {
@@ -1531,6 +1546,7 @@ export class AppController {
     this.showCollisionButton.addEventListener('click', this.onShowCollisionClick);
     this.viewModeButton.addEventListener('click', this.onViewModeClick);
     this.centerOfMassButton.addEventListener('click', this.onCenterOfMassClick);
+    this.groundContactsButton.addEventListener('click', this.onGroundContactsClick);
     this.urdfSelect.addEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.addEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
@@ -1618,6 +1634,7 @@ export class AppController {
     this.showCollisionButton.removeEventListener('click', this.onShowCollisionClick);
     this.viewModeButton.removeEventListener('click', this.onViewModeClick);
     this.centerOfMassButton.removeEventListener('click', this.onCenterOfMassClick);
+    this.groundContactsButton.removeEventListener('click', this.onGroundContactsClick);
     this.urdfSelect.removeEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.removeEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.removeEventListener('click', this.onMotionPlayClick);
@@ -1927,6 +1944,7 @@ export class AppController {
       this.sceneController.setGeometryVisibility(this.showVisual, this.showCollision);
       this.motionPlayer.attachRobot(result.robot);
       this.centerOfMassService.attachRobot(result.robot);
+      this.groundContactService.attachRobot(result.robot);
       this.centerOfMassTrail = [];
       this.lastLoadResult = result;
       this.selectedUrdfPath = result.selectedUrdfPath;
@@ -1990,14 +2008,15 @@ export class AppController {
     this.bvhMotionPlayer.load(null, null);
     this.motionPlayer.attachRobot(loadedRobotResult.robot);
     const bindingReport = this.motionPlayer.loadClip(clip);
+    this.currentMotionClip = clip;
     this.sceneController.syncGroundToCurrentRobot();
+    this.updateGroundContactVisualization();
     this.centerOfMassTrail = [];
     if (this.showCenterOfMass) {
       this.rebuildCenterOfMassTrail();
       this.updateCenterOfMassVisualization();
     }
 
-    this.currentMotionClip = clip;
     this.currentBvhMotion = null;
     this.currentBvhFileMap = null;
     this.currentMotionKind = motionKind;
@@ -3199,8 +3218,11 @@ export class AppController {
     this.motionPlayer.loadClip(null);
     this.motionPlayer.attachRobot(null);
     this.centerOfMassService.attachRobot(null);
+    this.groundContactService.attachRobot(null);
     this.centerOfMassTrail = [];
     this.sceneController.clearCenterOfMass();
+    this.groundContactCount = 0;
+    this.sceneController.clearGroundContacts();
     this.bvhMotionPlayer.pause();
     this.bvhMotionPlayer.load(null, null);
     this.smplMotionPlayer.pause();
@@ -4157,6 +4179,16 @@ export class AppController {
     }
   }
 
+  private updateGroundContactVisualization(): void {
+    if (!this.showGroundContacts || !this.lastLoadResult || !this.currentMotionClip) {
+      return;
+    }
+    const points = this.groundContactService.compute(this.sceneController.getGroundHeight());
+    this.groundContactCount = points.filter(({ isContact }) => isContact).length;
+    this.sceneController.updateGroundContacts(points);
+    this.groundContactsButton.textContent = `Contacts: ${this.groundContactCount}/${points.length}`;
+  }
+
   private syncVisibilityButtons(): void {
     const hasUrdfModel = Boolean(this.lastLoadResult);
     this.urdfVisualControls.hidden = !hasUrdfModel;
@@ -4179,6 +4211,18 @@ export class AppController {
           .toFixed(2)} kg`
       : 'Center of mass requires a URDF motion with inertial data.';
     this.centerOfMassButton.classList.toggle('active', this.showCenterOfMass);
+    const canShowGroundContacts =
+      hasUrdfModel &&
+      Boolean(this.currentMotionClip) &&
+      this.groundContactService.getFootLinkCount() > 0;
+    this.groundContactsButton.disabled = !canShowGroundContacts;
+    this.groundContactsButton.textContent = this.showGroundContacts
+      ? `Contacts: ${this.groundContactCount}/${this.groundContactService.getProbeCount()}`
+      : 'Contacts: Off';
+    this.groundContactsButton.title = canShowGroundContacts
+      ? 'Green probes touch the ground; red probes are above it.'
+      : 'Ground contacts require a URDF motion with foot geometry.';
+    this.groundContactsButton.classList.toggle('active', this.showGroundContacts);
   }
 
   private syncMotionControls(): void {

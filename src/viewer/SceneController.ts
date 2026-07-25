@@ -7,8 +7,10 @@ import {
   Group,
   GridHelper,
   HemisphereLight,
+  InstancedMesh,
   Line,
   LineBasicMaterial,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshPhongMaterial,
@@ -169,6 +171,10 @@ export class SceneController {
   private readonly centerOfMassMarker: any;
   private readonly centerOfMassProjection: any;
   private readonly centerOfMassTrail: any;
+  private readonly groundContactMarkers: any;
+  private readonly groundContactMatrix: any;
+  private readonly groundContactActiveColor: any;
+  private readonly groundContactInactiveColor: any;
   private currentRobot: UrdfRobotLike | null = null;
   private visualNodes: any[] = [];
   private collisionNodes: any[] = [];
@@ -178,6 +184,8 @@ export class SceneController {
   private showCollision = false;
   private showCenterOfMass = false;
   private hasCenterOfMass = false;
+  private showGroundContacts = false;
+  private groundContactCount = 0;
   private currentVisualProfile: SceneVisualProfile = 'default';
   private animationFrameId = 0;
   private readonly tempTrackTarget = new Vector3();
@@ -319,6 +327,21 @@ export class SceneController {
     );
     this.centerOfMassRoot.visible = false;
     this.scene.add(this.centerOfMassRoot);
+
+    this.groundContactMarkers = new InstancedMesh(
+      new SphereGeometry(0.022, 12, 8),
+      new MeshBasicMaterial({ color: '#ffffff', depthTest: false }),
+      96,
+    );
+    this.groundContactMarkers.name = 'ground-contact-markers';
+    this.groundContactMarkers.count = 0;
+    this.groundContactMarkers.frustumCulled = false;
+    this.groundContactMarkers.renderOrder = 21;
+    this.groundContactMarkers.visible = false;
+    this.groundContactMatrix = new Matrix4();
+    this.groundContactActiveColor = new Color('#2fe477');
+    this.groundContactInactiveColor = new Color('#ff4f5e');
+    this.scene.add(this.groundContactMarkers);
 
     this.groundPlane = new Mesh(
       new PlaneGeometry(GRID_BASE_SIZE, GRID_BASE_SIZE),
@@ -481,6 +504,7 @@ export class SceneController {
 
   clearRobot(): void {
     this.clearCenterOfMass();
+    this.clearGroundContacts();
     if (!this.currentRobot) {
       return;
     }
@@ -539,6 +563,45 @@ export class SceneController {
     this.centerOfMassRoot.visible = false;
     this.centerOfMassTrail.geometry?.dispose?.();
     this.centerOfMassTrail.geometry = new BufferGeometry();
+  }
+
+  getGroundHeight(): number {
+    return this.groundPlane.position.y;
+  }
+
+  setGroundContactVisibility(visible: boolean): void {
+    this.showGroundContacts = visible;
+    this.groundContactMarkers.visible = visible && this.groundContactCount > 0;
+  }
+
+  updateGroundContacts(
+    points: readonly { x: number; y: number; z: number; isContact: boolean }[],
+  ): void {
+    const count = Math.min(points.length, 96);
+    for (let index = 0; index < count; index += 1) {
+      const point = points[index];
+      this.groundContactMatrix.makeTranslation(point.x, point.y, point.z);
+      this.groundContactMarkers.setMatrixAt(index, this.groundContactMatrix);
+      this.groundContactMarkers.setColorAt(
+        index,
+        point.isContact
+          ? this.groundContactActiveColor
+          : this.groundContactInactiveColor,
+      );
+    }
+    this.groundContactCount = count;
+    this.groundContactMarkers.count = count;
+    this.groundContactMarkers.instanceMatrix.needsUpdate = true;
+    if (this.groundContactMarkers.instanceColor) {
+      this.groundContactMarkers.instanceColor.needsUpdate = true;
+    }
+    this.groundContactMarkers.visible = this.showGroundContacts && count > 0;
+  }
+
+  clearGroundContacts(): void {
+    this.groundContactCount = 0;
+    this.groundContactMarkers.count = 0;
+    this.groundContactMarkers.visible = false;
   }
 
   frameRobot(robot: UrdfRobotLike | null = this.currentRobot): any | null {
@@ -686,6 +749,8 @@ export class SceneController {
     disposeMaterial(this.centerOfMassProjection.material);
     this.centerOfMassTrail.geometry?.dispose?.();
     disposeMaterial(this.centerOfMassTrail.material);
+    this.groundContactMarkers.geometry?.dispose?.();
+    disposeMaterial(this.groundContactMarkers.material);
 
     this.environmentMapTarget?.dispose?.();
     this.pmremGenerator?.dispose?.();
