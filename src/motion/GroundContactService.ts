@@ -215,14 +215,15 @@ export class GroundContactService {
 
   compute(
     groundHeight: number,
-    contactThreshold = 0.025,
+    contactThreshold = 0.005,
+    lowestPointThreshold = 0.003,
   ): GroundContactPoint[] {
     this.buildFootOutlineProbes();
     if (!this.robot || this.footProbes.length === 0) {
       return [];
     }
     this.robot.updateMatrixWorld?.(true);
-    const points: GroundContactPoint[] = [];
+    const points: Array<GroundContactPoint & { height: number }> = [];
     for (const probe of this.footProbes) {
       this.tempPoint.copy(probe.localPoint).applyMatrix4(probe.link.matrixWorld);
       points.push({
@@ -231,9 +232,26 @@ export class GroundContactService {
         z: this.tempPoint.z,
         footName: probe.footName,
         probeName: probe.probeName,
-        isContact: Math.abs(this.tempPoint.y - groundHeight) <= contactThreshold,
+        isContact: false,
+        height: this.tempPoint.y,
       });
     }
-    return points;
+    const minimumHeightByFoot = new Map<string, number>();
+    for (const point of points) {
+      minimumHeightByFoot.set(
+        point.footName,
+        Math.min(
+          minimumHeightByFoot.get(point.footName) ?? Number.POSITIVE_INFINITY,
+          point.height,
+        ),
+      );
+    }
+    return points.map(({ height, ...point }) => ({
+      ...point,
+      isContact:
+        Math.abs(height - groundHeight) <= contactThreshold &&
+        height - (minimumHeightByFoot.get(point.footName) ?? height) <=
+          lowestPointThreshold,
+    }));
   }
 }

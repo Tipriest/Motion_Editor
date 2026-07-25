@@ -36,7 +36,7 @@ describe('GroundContactService', () => {
     const service = new GroundContactService();
     service.attachRobot(robot);
 
-    const contacts = service.compute(-0.05, 0.025);
+    const contacts = service.compute(-0.05);
 
     expect(service.getFootLinkCount()).toBe(1);
     expect(service.getProbeCount()).toBeGreaterThanOrEqual(12);
@@ -45,6 +45,19 @@ describe('GroundContactService', () => {
 
     foot.position.y = 0.1;
     foot.updateMatrixWorld(true);
-    expect(service.compute(-0.05, 0.025).every(({ isContact }) => !isContact)).toBe(true);
+    expect(service.compute(-0.05).every(({ isContact }) => !isContact)).toBe(true);
+
+    foot.position.y = 0;
+    foot.rotation.x = -Math.PI / 2 + 0.12;
+    foot.updateMatrixWorld(true);
+    const tiltedPositions = service.compute(
+      0,
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+    );
+    const lowestHeight = Math.min(...tiltedPositions.map(({ y }) => y));
+    const tiltedContacts = service.compute(lowestHeight);
+    expect(tiltedContacts.some(({ isContact }) => isContact)).toBe(true);
+    expect(tiltedContacts.some(({ isContact }) => !isContact)).toBe(true);
   });
 });
