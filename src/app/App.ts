@@ -1283,7 +1283,11 @@ export class AppController {
         sole,
         this.sceneController.getGroundHeight(),
       );
-      if (!result.success) {
+      const usesBestEffort =
+        !result.success &&
+        result.bestEffort === true &&
+        Object.keys(result.jointValues).length > 0;
+      if (!result.success && !usesBestEffort) {
         throw new Error(result.reason ?? `Could not align the ${side} foot.`);
       }
       const currentFrame = this.motionPlayer.getCurrentFrame();
@@ -1307,6 +1311,13 @@ export class AppController {
         this.updateCenterOfMassVisualization();
       }
       this.updateGroundContactVisualization();
+      if (usesBestEffort) {
+        window.alert(
+          `${result.reason ?? 'Foot alignment constraints were not fully met.'}\n\n` +
+            `Applied the lowest reachable ${side} foot pose within the joint limits. ` +
+            'The resulting pose is a best-effort fallback, not a fully aligned solution.',
+        );
+      }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     } finally {

@@ -7,10 +7,15 @@ export type FootSide = 'left' | 'right';
 
 export interface FootAlignmentResult {
   success: boolean;
+  bestEffort?: boolean;
   jointValues: Record<string, number>;
   iterations: number;
   positionError: number;
   orientationError: number;
+  heightError?: number;
+  horizontalError?: number;
+  forwardTiltError?: number;
+  sideTiltError?: number;
   reason?: string;
 }
 
@@ -114,15 +119,26 @@ export class FootGroundAlignmentService {
         Math.min(Number.isFinite(upper) ? upper : Number.POSITIVE_INFINITY, value),
       );
       joint.setJointValue(clamped);
-      return clamped;
+      const applied = Number(joint.jointValue?.[0]);
+      return Number.isFinite(applied) ? applied : clamped;
     };
 
     let iterations = 0;
     let positionError = Number.POSITIVE_INFINITY;
     let orientationError = Number.POSITIVE_INFINITY;
+    let heightError = Number.POSITIVE_INFINITY;
+    let horizontalError = Number.POSITIVE_INFINITY;
+    let forwardTiltError = Number.POSITIVE_INFINITY;
+    let sideTiltError = Number.POSITIVE_INFINITY;
     let solvedValues: number[] | null = null;
+    let bestEffortValues: number[] | null = null;
+    let bestEffortHeight = Number.POSITIVE_INFINITY;
+    let bestEffortHorizontal = Number.POSITIVE_INFINITY;
+    let bestEffortOrientation = Number.POSITIVE_INFINITY;
+    let initialFootHeight = Number.POSITIVE_INFINITY;
     try {
       const initialPose = readPose();
+      initialFootHeight = initialPose.position.y;
       const up = new Vector3(0, 1, 0);
       const orientationWeight = 0.18;
       const horizontalWeight = 0.35;
@@ -134,10 +150,22 @@ export class FootGroundAlignmentService {
         const heightDelta = groundHeight - pose.position.y;
         const horizontalDeltaX = initialPose.position.x - pose.position.x;
         const horizontalDeltaZ = initialPose.position.z - pose.position.z;
-        const horizontalError = Math.hypot(horizontalDeltaX, horizontalDeltaZ);
+        horizontalError = Math.hypot(horizontalDeltaX, horizontalDeltaZ);
+        heightError = Math.abs(heightDelta);
         const normalCorrection = new Vector3().crossVectors(pose.normal, up);
         positionError = Math.hypot(heightDelta, horizontalError);
         orientationError = Math.acos(Math.max(-1, Math.min(1, pose.normal.dot(up))));
+        sideTiltError = Math.abs(Math.atan2(pose.normal.x, pose.normal.y));
+        forwardTiltError = Math.abs(Math.atan2(pose.normal.z, pose.normal.y));
+        const improvesHeight =
+          heightError < bestEffortHeight - 1e-9 &&
+          pose.position.y < initialFootHeight - 1e-9;
+        if (improvesHeight) {
+          bestEffortValues = [...currentValues];
+          bestEffortHeight = heightError;
+          bestEffortHorizontal = horizontalError;
+          bestEffortOrientation = orientationError;
+        }
         if (
           Math.abs(heightDelta) < 0.0015 &&
           horizontalError < 0.003 &&
@@ -155,21 +183,37 @@ export class FootGroundAlignmentService {
         ];
         const jacobian = Array.from({ length: 5 }, () => Array(6).fill(0));
         for (let jointIndex = 0; jointIndex < joints.length; jointIndex += 1) {
-          applyJoint(jointIndex, currentValues[jointIndex] + epsilon);
+          let perturbedValue = applyJoint(
+            jointIndex,
+            currentValues[jointIndex] + epsilon,
+          );
+          if (Math.abs(perturbedValue - currentValues[jointIndex]) < epsilon * 0.5) {
+            perturbedValue = applyJoint(
+              jointIndex,
+              currentValues[jointIndex] - epsilon,
+            );
+          }
+          const jointDelta = perturbedValue - currentValues[jointIndex];
+          if (Math.abs(jointDelta) < 1e-10) {
+            applyJoint(jointIndex, currentValues[jointIndex]);
+            continue;
+          }
           const perturbed = readPose();
           const normalDerivative = new Vector3()
             .crossVectors(pose.normal, perturbed.normal)
-            .multiplyScalar(1 / epsilon);
+            .multiplyScalar(1 / jointDelta);
           jacobian[0][jointIndex] =
-            (perturbed.position.y - pose.position.y) / epsilon;
+            (perturbed.position.y - pose.position.y) / jointDelta;
           jacobian[1][jointIndex] =
             normalDerivative.x * orientationWeight;
           jacobian[2][jointIndex] =
             normalDerivative.z * orientationWeight;
           jacobian[3][jointIndex] =
-            ((perturbed.position.x - pose.position.x) * horizontalWeight) / epsilon;
+            ((perturbed.position.x - pose.position.x) * horizontalWeight) /
+            jointDelta;
           jacobian[4][jointIndex] =
-            ((perturbed.position.z - pose.position.z) * horizontalWeight) / epsilon;
+            ((perturbed.position.z - pose.position.z) * horizontalWeight) /
+            jointDelta;
           applyJoint(jointIndex, currentValues[jointIndex]);
         }
         const normalMatrix = Array.from({ length: 5 }, (_, row) =>
@@ -195,19 +239,30 @@ export class FootGroundAlignmentService {
         }
       }
       const finalPose = readPose();
-      const finalHeightError = Math.abs(finalPose.position.y - groundHeight);
-      const finalHorizontalError = Math.hypot(
+      heightError = Math.abs(finalPose.position.y - groundHeight);
+      horizontalError = Math.hypot(
         finalPose.position.x - initialPose.position.x,
         finalPose.position.z - initialPose.position.z,
       );
-      positionError = Math.hypot(finalHeightError, finalHorizontalError);
+      positionError = Math.hypot(heightError, horizontalError);
       orientationError = Math.acos(
         Math.max(-1, Math.min(1, finalPose.normal.dot(new Vector3(0, 1, 0)))),
       );
+      sideTiltError = Math.abs(Math.atan2(finalPose.normal.x, finalPose.normal.y));
+      forwardTiltError = Math.abs(Math.atan2(finalPose.normal.z, finalPose.normal.y));
+      const finalImprovesHeight =
+        heightError < bestEffortHeight - 1e-9 &&
+        finalPose.position.y < initialFootHeight - 1e-9;
+      if (finalImprovesHeight) {
+        bestEffortValues = [...currentValues];
+        bestEffortHeight = heightError;
+        bestEffortHorizontal = horizontalError;
+        bestEffortOrientation = orientationError;
+      }
       if (
         !solvedValues &&
-        finalHeightError < 0.006 &&
-        finalHorizontalError < 0.012 &&
+        heightError < 0.006 &&
+        horizontalError < 0.012 &&
         orientationError < 0.035
       ) {
         solvedValues = [...currentValues];
@@ -218,13 +273,75 @@ export class FootGroundAlignmentService {
     }
 
     if (!solvedValues) {
+      const fallbackValues = bestEffortValues;
+      if (fallbackValues) {
+        fallbackValues.forEach((value, index) => applyJoint(index, value));
+        const fallbackPose = readPose();
+        heightError = Math.abs(fallbackPose.position.y - groundHeight);
+        horizontalError = bestEffortHorizontal;
+        orientationError = bestEffortOrientation;
+        positionError = Math.hypot(heightError, horizontalError);
+        sideTiltError = Math.abs(
+          Math.atan2(fallbackPose.normal.x, fallbackPose.normal.y),
+        );
+        forwardTiltError = Math.abs(
+          Math.atan2(fallbackPose.normal.z, fallbackPose.normal.y),
+        );
+        originalValues.forEach((value, index) => applyJoint(index, value));
+        robot.updateMatrixWorld?.(true);
+      }
+      const failures: string[] = [];
+      if (heightError >= 0.006) {
+        failures.push(
+          `Foot height error: ${(heightError * 1_000).toFixed(1)} mm (required ≤ 6.0 mm)`,
+        );
+      }
+      if (horizontalError >= 0.012) {
+        failures.push(
+          `Foot projection drift: ${(horizontalError * 1_000).toFixed(1)} mm (required ≤ 12.0 mm)`,
+        );
+      }
+      if (orientationError >= 0.035) {
+        failures.push(
+          `Forward tilt: ${((forwardTiltError * 180) / Math.PI).toFixed(2)}°; side tilt: ${((sideTiltError * 180) / Math.PI).toFixed(2)}° (combined required ≤ 2.01°)`,
+        );
+      }
+      const reportedValues = fallbackValues ?? currentValues;
+      const limitedJoints = jointNames.filter((_, index) => {
+        const joint = joints[index];
+        const lower = Number(joint.limit?.lower);
+        const upper = Number(joint.limit?.upper);
+        return (
+          (Number.isFinite(lower) && Math.abs(reportedValues[index] - lower) < 1e-4) ||
+          (Number.isFinite(upper) && Math.abs(reportedValues[index] - upper) < 1e-4)
+        );
+      });
+      if (limitedJoints.length > 0) {
+        failures.push(`Joints at limits: ${limitedJoints.join(', ')}`);
+      }
       return {
         success: false,
-        jointValues: {},
+        bestEffort: fallbackValues !== null,
+        jointValues: fallbackValues
+          ? Object.fromEntries(
+              jointNames.map((name, index) => [name, fallbackValues[index]]),
+            )
+          : {},
         iterations,
         positionError,
         orientationError,
-        reason: 'The selected foot target could not be reached within the joint limits.',
+        heightError,
+        horizontalError,
+        forwardTiltError,
+        sideTiltError,
+        reason:
+          failures.length > 0
+            ? `Foot alignment constraints not met:\n• ${failures.join('\n• ')}${
+                fallbackValues
+                  ? '\n\nThe closest reachable lowered-foot pose will be applied.'
+                  : ''
+              }`
+            : 'The foot IK solver did not converge. Try increasing the smoothing range or adjusting the pose first.',
       };
     }
     return {
@@ -235,6 +352,10 @@ export class FootGroundAlignmentService {
       iterations,
       positionError,
       orientationError,
+      heightError,
+      horizontalError,
+      forwardTiltError,
+      sideTiltError,
     };
   }
 }
