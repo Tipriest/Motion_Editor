@@ -1127,6 +1127,14 @@ export class AppController {
       if (this.isMotionPlaying) {
         this.pauseActiveMotion();
       } else {
+        const snapshot = this.motionFrameSnapshot;
+        if (
+          snapshot &&
+          snapshot.frameCount > 0 &&
+          snapshot.frameIndex >= snapshot.frameCount - 1
+        ) {
+          this.resetActiveMotion();
+        }
         this.playActiveMotion();
       }
       return;

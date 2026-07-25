@@ -329,7 +329,7 @@ export class SceneController {
     this.scene.add(this.centerOfMassRoot);
 
     this.groundContactMarkers = new InstancedMesh(
-      new SphereGeometry(0.022, 12, 8),
+      new SphereGeometry(0.012, 10, 7),
       new MeshBasicMaterial({ color: '#ffffff', depthTest: false }),
       96,
     );
