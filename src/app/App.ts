@@ -44,6 +44,11 @@ import {
   FootGroundAlignmentService,
   type FootSide,
 } from '../motion/FootGroundAlignmentService';
+import {
+  buildFootLockHeightCandidates,
+  FootLockService,
+  smoothFootLockHeightOffsets,
+} from '../motion/FootLockService';
 import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlayer';
 import {
   GroundContactService,
@@ -949,6 +954,7 @@ export class AppController {
   private readonly centerOfMassService: CenterOfMassService;
   private readonly groundContactService: GroundContactService;
   private readonly footGroundAlignmentService: FootGroundAlignmentService;
+  private readonly footLockService: FootLockService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -970,6 +976,10 @@ export class AppController {
   private readonly alignLeftFootButton: HTMLButtonElement;
   private readonly alignRightFootButton: HTMLButtonElement;
   private readonly footAlignSmoothFramesInput: HTMLInputElement;
+  private readonly footLockSideSelect: HTMLSelectElement;
+  private readonly footLockDurationInput: HTMLInputElement;
+  private readonly footLockBlendFramesInput: HTMLInputElement;
+  private readonly applyFootLockButton: HTMLButtonElement;
   private readonly comOffsetXInput: HTMLInputElement;
   private readonly comOffsetYInput: HTMLInputElement;
   private readonly comOffsetZInput: HTMLInputElement;
@@ -1344,6 +1354,274 @@ export class AppController {
     }
   }
 
+  private readonly onApplyFootLockClick = (): void => {
+    void this.applyFootLock();
+  };
+
+  private async applyFootLock(): Promise<void> {
+    const loadedRobot = this.lastLoadResult;
+    const clip = this.currentMotionClip;
+    if (!loadedRobot || !clip || !isUrdfMotionKind(this.currentMotionKind)) {
+      return;
+    }
+    const side = this.footLockSideSelect.value as FootSide;
+    const sole = this.groundContactService.getFootSole(side);
+    if (!sole) {
+      window.alert(`Could not resolve the ${side} foot sole outline.`);
+      return;
+    }
+    const startFrame = this.motionPlayer.getCurrentFrame();
+    const requestedDuration = Math.max(
+      1,
+      Math.min(10_000, Math.round(Number(this.footLockDurationInput.value) || 1)),
+    );
+    const endFrame = Math.min(
+      clip.frameCount - 1,
+      startFrame + requestedDuration - 1,
+    );
+    const duration = endFrame - startFrame + 1;
+    const blendFrames = Math.max(
+      0,
+      Math.min(
+        200,
+        Math.round(Number(this.footLockBlendFramesInput.value) || 0),
+      ),
+    );
+    const blendEndFrame = Math.min(clip.frameCount - 1, endFrame + blendFrames);
+    this.footLockDurationInput.value = String(duration);
+    this.footLockBlendFramesInput.value = String(blendFrames);
+    this.motionPlayer.seek(startFrame);
+    const selectedFootContacts = this.groundContactService
+      .compute(this.sceneController.getGroundHeight())
+      .filter(({ footName }) => footName === sole.footName);
+    if (
+      selectedFootContacts.length > 0 &&
+      !selectedFootContacts.some(({ isContact }) => isContact) &&
+      !window.confirm(
+        `The ${side} foot is not currently touching the ground. Lock its airborne pose anyway?`,
+      )
+    ) {
+      return;
+    }
+
+    const target = this.footLockService.captureTarget(loadedRobot.robot, sole);
+    const stride = clip.stride;
+    const snapshot = clip.data.slice(
+      startFrame * stride,
+      (blendEndFrame + 1) * stride,
+    );
+    const originalKeyframes = new Set(this.keyframes);
+    const jointIndices = new Map(
+      clip.schema.jointNames.map((jointName, index) => [jointName, index]),
+    );
+    const originalText = this.applyFootLockButton.textContent;
+    this.pauseActiveMotion();
+    this.applyFootLockButton.disabled = true;
+    this.alignLeftFootButton.disabled = true;
+    this.alignRightFootButton.disabled = true;
+    this.applyComAdjustmentButton.disabled = true;
+    this.applyFootLockButton.textContent = 'Locking…';
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    try {
+      const restoreFrame = (frame: number): void => {
+        const snapshotOffset = (frame - startFrame) * stride;
+        clip.data.set(
+          snapshot.subarray(snapshotOffset, snapshotOffset + stride),
+          frame * stride,
+        );
+        this.motionPlayer.seek(frame);
+      };
+      const solveAtHeightOffset = (
+        frame: number,
+        heightOffset: number,
+        warmStart: Record<string, number> | null,
+      ) => {
+        restoreFrame(frame);
+        const originalRoot = this.motionPlayer.getRootPosition();
+        this.motionPlayer.setRootPosition(
+          originalRoot.x,
+          originalRoot.y,
+          originalRoot.z + heightOffset,
+        );
+        if (warmStart) {
+          for (const [jointName, value] of Object.entries(warmStart)) {
+            this.motionPlayer.setJointValue(jointName, value);
+          }
+        }
+        const result = this.footLockService.lock(
+          loadedRobot.robot,
+          side,
+          sole,
+          target,
+        );
+        if (result.success) {
+          for (const [jointName, value] of Object.entries(result.jointValues)) {
+            this.motionPlayer.setJointValue(jointName, value);
+          }
+        }
+        return result;
+      };
+      const solveCandidate = (
+        frame: number,
+        heightOffset: number,
+        warmStart: Record<string, number> | null,
+      ) => {
+        let result = solveAtHeightOffset(frame, heightOffset, warmStart);
+        if (!result.success && warmStart) {
+          result = solveAtHeightOffset(frame, heightOffset, null);
+        }
+        return result;
+      };
+
+      const rawHeightOffsets: number[] = [];
+      let previousHeightOffset = 0;
+      let previousValues: Record<string, number> | null = null;
+      for (let frame = startFrame; frame <= endFrame; frame += 1) {
+        let solved:
+          | ReturnType<typeof solveCandidate>
+          | null = null;
+        let solvedOffset = 0;
+        for (const candidate of buildFootLockHeightCandidates(previousHeightOffset)) {
+          const result = solveCandidate(frame, candidate, previousValues);
+          if (result.success) {
+            solved = result;
+            solvedOffset = candidate;
+            break;
+          }
+        }
+        if (!solved) {
+          throw new Error(
+            `Frame ${frame + 1} could not keep the ${side} foot locked, even after searching pelvis/CoM height within ±150 mm.`,
+          );
+        }
+        rawHeightOffsets.push(solvedOffset);
+        previousHeightOffset = solvedOffset;
+        previousValues = solved.jointValues;
+        this.applyFootLockButton.textContent =
+          `Finding CoM ${frame - startFrame + 1}/${duration}…`;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+
+      const smoothedHeightOffsets = smoothFootLockHeightOffsets(
+        rawHeightOffsets,
+        Math.min(3, Math.floor((duration - 1) / 2)),
+      );
+      smoothedHeightOffsets[0] = 0;
+      clip.data.set(
+        snapshot.subarray(0, duration * stride),
+        startFrame * stride,
+      );
+      previousValues = null;
+      let finalCorrection = new Map<string, number>();
+      let finalHeightOffset = 0;
+      for (let frame = startFrame; frame <= endFrame; frame += 1) {
+        const index = frame - startFrame;
+        const smoothedOffset = smoothedHeightOffsets[index];
+        const rawOffset = rawHeightOffsets[index];
+        const heightCandidates = [
+          smoothedOffset,
+          smoothedOffset + (rawOffset - smoothedOffset) * 0.25,
+          smoothedOffset + (rawOffset - smoothedOffset) * 0.5,
+          smoothedOffset + (rawOffset - smoothedOffset) * 0.75,
+          rawOffset,
+        ].filter(
+          (value, candidateIndex, values) =>
+            values.findIndex((candidate) => Math.abs(candidate - value) < 1e-6) ===
+            candidateIndex,
+        );
+        let result: ReturnType<typeof solveCandidate> | null = null;
+        let appliedHeightOffset = rawOffset;
+        for (const candidate of heightCandidates) {
+          const candidateResult = solveCandidate(frame, candidate, previousValues);
+          if (candidateResult.success) {
+            result = candidateResult;
+            appliedHeightOffset = candidate;
+            break;
+          }
+        }
+        if (!result) {
+          throw new Error(
+            `Frame ${frame + 1} could not keep the ${side} foot locked after smoothing the pelvis/CoM height.`,
+          );
+        }
+        previousValues = result.jointValues;
+        if (frame === endFrame) {
+          finalHeightOffset = appliedHeightOffset;
+          finalCorrection = new Map(
+            Object.entries(result.jointValues).map(([jointName, value]) => {
+              const jointIndex = jointIndices.get(jointName);
+              const snapshotOffset =
+                (frame - startFrame) * stride +
+                DEFAULT_ROOT_COMPONENT_COUNT +
+                (jointIndex ?? -1);
+              const originalValue =
+                jointIndex === undefined ? value : snapshot[snapshotOffset];
+              return [jointName, value - originalValue];
+            }),
+          );
+        }
+        this.applyFootLockButton.textContent =
+          `Smoothing CoM ${frame - startFrame + 1}/${duration}…`;
+        if ((frame - startFrame) % 4 === 3) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+      }
+
+      const actualBlendFrames = blendEndFrame - endFrame;
+      for (let frame = endFrame + 1; frame <= blendEndFrame; frame += 1) {
+        this.motionPlayer.seek(frame);
+        const blendStep = frame - endFrame;
+        const weight = 1 - blendStep / (actualBlendFrames + 1);
+        const originalRoot = this.motionPlayer.getRootPosition();
+        this.motionPlayer.setRootPosition(
+          originalRoot.x,
+          originalRoot.y,
+          originalRoot.z + finalHeightOffset * weight,
+        );
+        for (const [jointName, correction] of finalCorrection) {
+          const jointIndex = jointIndices.get(jointName);
+          if (jointIndex === undefined) {
+            continue;
+          }
+          const snapshotOffset =
+            (frame - startFrame) * stride +
+            DEFAULT_ROOT_COMPONENT_COUNT +
+            jointIndex;
+          this.motionPlayer.setJointValue(
+            jointName,
+            snapshot[snapshotOffset] + correction * weight,
+          );
+        }
+      }
+      const maximumHeightAdjustment = Math.max(
+        ...rawHeightOffsets.map((value) => Math.abs(value)),
+      );
+      if (maximumHeightAdjustment > 0.001) {
+        console.info(
+          `Foot lock adjusted pelvis/CoM height by up to ${(maximumHeightAdjustment * 1_000).toFixed(0)} mm.`,
+        );
+      }
+      this.keyframes.add(startFrame);
+      this.keyframes.add(endFrame);
+      this.motionPlayer.seek(startFrame);
+      this.updateKeyframeMarkers();
+      if (this.showCenterOfMass) {
+        this.rebuildCenterOfMassTrail();
+        this.updateCenterOfMassVisualization();
+      }
+      this.updateGroundContactVisualization();
+    } catch (error) {
+      clip.data.set(snapshot, startFrame * stride);
+      this.keyframes = originalKeyframes;
+      this.motionPlayer.seek(startFrame);
+      this.updateKeyframeMarkers();
+      window.alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.applyFootLockButton.textContent = originalText;
+      this.syncVisibilityButtons();
+    }
+  }
+
   private readonly onApplyComAdjustmentClick = (): void => {
     void this.applyCenterOfMassAdjustment();
   };
@@ -1684,6 +1962,13 @@ export class AppController {
     this.alignRightFootButton = requireElement<HTMLButtonElement>('align-right-foot-btn');
     this.footAlignSmoothFramesInput =
       requireElement<HTMLInputElement>('foot-align-smooth-frames');
+    this.footLockSideSelect = requireElement<HTMLSelectElement>('foot-lock-side');
+    this.footLockDurationInput =
+      requireElement<HTMLInputElement>('foot-lock-duration');
+    this.footLockBlendFramesInput =
+      requireElement<HTMLInputElement>('foot-lock-blend-frames');
+    this.applyFootLockButton =
+      requireElement<HTMLButtonElement>('apply-foot-lock-btn');
     this.comOffsetXInput = requireElement<HTMLInputElement>('com-offset-x');
     this.comOffsetYInput = requireElement<HTMLInputElement>('com-offset-y');
     this.comOffsetZInput = requireElement<HTMLInputElement>('com-offset-z');
@@ -1759,6 +2044,7 @@ export class AppController {
     this.centerOfMassService = new CenterOfMassService();
     this.groundContactService = new GroundContactService();
     this.footGroundAlignmentService = new FootGroundAlignmentService();
+    this.footLockService = new FootLockService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
@@ -1854,6 +2140,7 @@ export class AppController {
     this.groundContactsButton.addEventListener('click', this.onGroundContactsClick);
     this.alignLeftFootButton.addEventListener('click', this.onAlignLeftFootClick);
     this.alignRightFootButton.addEventListener('click', this.onAlignRightFootClick);
+    this.applyFootLockButton.addEventListener('click', this.onApplyFootLockClick);
     this.applyComAdjustmentButton.addEventListener(
       'click',
       this.onApplyComAdjustmentClick,
@@ -1948,6 +2235,7 @@ export class AppController {
     this.groundContactsButton.removeEventListener('click', this.onGroundContactsClick);
     this.alignLeftFootButton.removeEventListener('click', this.onAlignLeftFootClick);
     this.alignRightFootButton.removeEventListener('click', this.onAlignRightFootClick);
+    this.applyFootLockButton.removeEventListener('click', this.onApplyFootLockClick);
     this.applyComAdjustmentButton.removeEventListener(
       'click',
       this.onApplyComAdjustmentClick,
@@ -4567,6 +4855,13 @@ export class AppController {
     this.alignLeftFootButton.disabled = !canAlignFeet;
     this.alignRightFootButton.disabled = !canAlignFeet;
     this.footAlignSmoothFramesInput.disabled = !canAlignFeet;
+    this.footLockSideSelect.disabled = !canAlignFeet;
+    this.footLockDurationInput.disabled = !canAlignFeet;
+    this.footLockBlendFramesInput.disabled = !canAlignFeet;
+    this.applyFootLockButton.disabled = !canAlignFeet;
+    this.applyFootLockButton.title = canAlignFeet
+      ? 'Keep one foot at its current world position and rotation for a frame range.'
+      : 'Foot locking requires an editable URDF motion with resolved foot geometry.';
     this.comOffsetXInput.disabled = !canAlignFeet;
     this.comOffsetYInput.disabled = !canAlignFeet;
     this.comOffsetZInput.disabled = !canAlignFeet;

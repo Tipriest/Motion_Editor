@@ -867,6 +867,7 @@ body {
 }
 
 .foot-align-controls,
+.foot-lock-controls,
 .com-adjust-controls {
   margin-top: 0.5rem;
   display: flex;
@@ -878,6 +879,8 @@ body {
 }
 
 .foot-align-controls input,
+.foot-lock-controls input,
+.foot-lock-controls select,
 .com-adjust-controls input,
 .com-adjust-controls select {
   width: 58px;
@@ -886,6 +889,14 @@ body {
   border-radius: 7px;
   background: rgba(7, 22, 32, 0.8);
   color: var(--text-main);
+}
+
+.foot-lock-controls input {
+  width: 64px;
+}
+
+.foot-lock-controls select {
+  width: auto;
 }
 
 .com-adjust-controls input {
