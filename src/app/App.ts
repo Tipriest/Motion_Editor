@@ -6,7 +6,7 @@ import type {
   ViewerState,
 } from '../types/viewer';
 import motionAssetPaths from 'virtual:motion-assets';
-import { Box3, Quaternion, Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
 import { dataTransferToFileMap, fileListToFileMap } from '../io/drop/dataTransferToFileMap';
 import { registerDropHandlers } from '../io/drop/registerDropHandlers';
 import {
@@ -30,6 +30,7 @@ import {
   exportUfoTrainingPkl,
   exportUfoTrainingPklBatchPartsAsync,
 } from '../io/motion/UfoTrainingPklService';
+import { UfoTrainingPklMotionService } from '../io/motion/UfoTrainingPklMotionService';
 import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
@@ -132,7 +133,13 @@ interface ViewerPresetManifest {
   capturedObjects: PresetAssetFile[];
 }
 
-type UrdfMotionKind = 'csv' | 'mimickit' | 'gmr' | 'ufo-reference' | 'robot-state';
+type UrdfMotionKind =
+  | 'csv'
+  | 'mimickit'
+  | 'gmr'
+  | 'ufo-reference'
+  | 'ufo-training'
+  | 'robot-state';
 type ViewerMotionKind = UrdfMotionKind | 'bvh' | 'smpl';
 
 function isUrdfMotionKind(kind: ViewerMotionKind | null): kind is UrdfMotionKind {
@@ -141,6 +148,7 @@ function isUrdfMotionKind(kind: ViewerMotionKind | null): kind is UrdfMotionKind
     kind === 'mimickit' ||
     kind === 'gmr' ||
     kind === 'ufo-reference' ||
+    kind === 'ufo-training' ||
     kind === 'robot-state'
   );
 }
@@ -577,6 +585,7 @@ interface SelectableMotionOption {
 type MotionBrowserFormat =
   | 'GMR PKL'
   | 'MimicKit PKL'
+  | 'UFO Training PKL'
   | 'UFO Reference NPZ'
   | 'Robot-State NPZ'
   | 'CSV'
@@ -930,6 +939,7 @@ export class AppController {
   private readonly csvMotionService: CsvMotionService;
   private readonly mimicKitMotionService: MimicKitMotionService;
   private readonly gmrMotionService: GmrMotionService;
+  private readonly ufoTrainingPklMotionService: UfoTrainingPklMotionService;
   private readonly ufoReferenceMotionService: UfoReferenceMotionService;
   private readonly robotStateNpzMotionService: RobotStateNpzMotionService;
   private readonly bvhMotionService: BvhMotionService;
@@ -1448,17 +1458,11 @@ export class AppController {
     this.applyComAdjustmentButton.textContent = 'Applying CoM…';
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     try {
-      const modelRoot = loadedRobot.robot.parent as any;
-      const localOffset = offset.clone();
-      if (typeof modelRoot?.getWorldQuaternion === 'function') {
-        const modelQuaternion = modelRoot.getWorldQuaternion(new Quaternion());
-        localOffset.applyQuaternion(modelQuaternion.invert());
-      }
       const rootPosition = this.motionPlayer.getRootPosition();
       this.motionPlayer.setRootPosition(
-        rootPosition.x + localOffset.x,
-        rootPosition.y + localOffset.y,
-        rootPosition.z + localOffset.z,
+        rootPosition.x + offset.x,
+        rootPosition.y + offset.y,
+        rootPosition.z + offset.z,
       );
       this.keyframes.add(currentFrame);
       for (const axis of ['x', 'y', 'z']) {
@@ -1745,6 +1749,7 @@ export class AppController {
     this.csvMotionService = new CsvMotionService();
     this.mimicKitMotionService = new MimicKitMotionService();
     this.gmrMotionService = new GmrMotionService();
+    this.ufoTrainingPklMotionService = new UfoTrainingPklMotionService();
     this.ufoReferenceMotionService = new UfoReferenceMotionService();
     this.robotStateNpzMotionService = new RobotStateNpzMotionService();
     this.bvhMotionService = new BvhMotionService();
@@ -2096,32 +2101,34 @@ export class AppController {
         return;
       }
 
-      // 尝试所有.pkl文件，先尝试MimicKit，再尝试GMR
+      // Try UFO Training, MimicKit, then GMR for each PKL.
       for (const path of mimicKitPklPaths) {
         try {
           this.setState('loading', {
-            detail: 'Loading MimicKit motion PKL ...',
+            detail: 'Loading UFO Training MotionLib PKL ...',
           });
-          const result = await this.mimicKitMotionService.loadFromDroppedFiles(
+          const result = await this.ufoTrainingPklMotionService.loadFromDroppedFiles(
             fileMap,
-            loadedRobotResult.motionSchema,
             path,
           );
           this.applyLoadedUrdfMotion(
             loadedRobotResult,
             result.clip,
-            'mimickit',
+            'ufo-training',
             result.selectedMotionPath,
             result.warnings,
           );
           return;
-        } catch (mimicKitError) {
-          console.log(`Failed to load ${path} as MimicKit, trying GMR:`, mimicKitError);
+        } catch (ufoTrainingError) {
+          console.log(
+            `Failed to load ${path} as UFO Training, trying MimicKit:`,
+            ufoTrainingError,
+          );
           try {
             this.setState('loading', {
-              detail: 'Loading GMR motion PKL ...',
+              detail: 'Loading MimicKit motion PKL ...',
             });
-            const result = await this.gmrMotionService.loadFromDroppedFiles(
+            const result = await this.mimicKitMotionService.loadFromDroppedFiles(
               fileMap,
               loadedRobotResult.motionSchema,
               path,
@@ -2129,14 +2136,34 @@ export class AppController {
             this.applyLoadedUrdfMotion(
               loadedRobotResult,
               result.clip,
-              'gmr',
+              'mimickit',
               result.selectedMotionPath,
               result.warnings,
             );
             return;
-          } catch (gmrError) {
-            console.log(`Failed to load ${path} as GMR either:`, gmrError);
-            // 继续尝试下一个文件
+          } catch (mimicKitError) {
+            console.log(`Failed to load ${path} as MimicKit, trying GMR:`, mimicKitError);
+            try {
+              this.setState('loading', {
+                detail: 'Loading GMR motion PKL ...',
+              });
+              const result = await this.gmrMotionService.loadFromDroppedFiles(
+                fileMap,
+                loadedRobotResult.motionSchema,
+                path,
+              );
+              this.applyLoadedUrdfMotion(
+                loadedRobotResult,
+                result.clip,
+                'gmr',
+                result.selectedMotionPath,
+                result.warnings,
+              );
+              return;
+            } catch (gmrError) {
+              console.log(`Failed to load ${path} as GMR either:`, gmrError);
+              // Continue with the next PKL.
+            }
           }
         }
       }
@@ -2144,7 +2171,7 @@ export class AppController {
       // 所有文件都尝试失败
       this.setState('error', {
         title: 'Motion Load Failed',
-        detail: 'Failed to load any .pkl file as either MimicKit or GMR format.',
+        detail: 'Failed to load any .pkl file as UFO Training, MimicKit, or GMR format.',
       });
     }
 
@@ -5313,21 +5340,30 @@ export class AppController {
         format = 'CSV';
       } else if (extension === '.pkl') {
         try {
-          const result = await this.gmrMotionService.loadFromDroppedFiles(
+          const result = await this.ufoTrainingPklMotionService.loadFromDroppedFiles(
             fileMap,
-            loadedRobot.motionSchema,
             selectedPath,
           );
           clip = result.clip;
-          format = 'GMR PKL';
+          format = 'UFO Training PKL';
         } catch {
-          const result = await this.mimicKitMotionService.loadFromDroppedFiles(
-            fileMap,
-            loadedRobot.motionSchema,
-            selectedPath,
-          );
-          clip = result.clip;
-          format = 'MimicKit PKL';
+          try {
+            const result = await this.gmrMotionService.loadFromDroppedFiles(
+              fileMap,
+              loadedRobot.motionSchema,
+              selectedPath,
+            );
+            clip = result.clip;
+            format = 'GMR PKL';
+          } catch {
+            const result = await this.mimicKitMotionService.loadFromDroppedFiles(
+              fileMap,
+              loadedRobot.motionSchema,
+              selectedPath,
+            );
+            clip = result.clip;
+            format = 'MimicKit PKL';
+          }
         }
       } else if (extension === '.npz') {
         const ufoPaths = await this.ufoReferenceMotionService.findCompatiblePaths(fileMap, 1);
@@ -6405,6 +6441,16 @@ export class AppController {
       content = csvContent;
       fileName = buildMotionExportFileName(clip.name, playbackSpeed, null, 'csv');
       mimeType = 'text/csv;charset=utf-8';
+    } else if (this.currentMotionKind === 'ufo-training') {
+      console.log('Generating UFO MotionLib training PKL content');
+      content = exportUfoTrainingPkl(clip, this.motionPlayer);
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'ufo_training',
+        'pkl',
+      );
+      mimeType = 'application/octet-stream';
     } else if (this.currentMotionKind === 'gmr' || this.currentMotionKind === 'robot-state') {
       console.log('Generating GMR PKL content');
       const pklContent = this.gmrMotionService.toGmrPkl(clip);
