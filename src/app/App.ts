@@ -6,7 +6,7 @@ import type {
   ViewerState,
 } from '../types/viewer';
 import motionAssetPaths from 'virtual:motion-assets';
-import { Box3, Vector3 } from 'three';
+import { Box3, Quaternion, Vector3 } from 'three';
 import { dataTransferToFileMap, fileListToFileMap } from '../io/drop/dataTransferToFileMap';
 import { registerDropHandlers } from '../io/drop/registerDropHandlers';
 import {
@@ -44,7 +44,10 @@ import {
   type FootSide,
 } from '../motion/FootGroundAlignmentService';
 import { G1MotionPlayer, type MotionFrameSnapshot } from '../motion/G1MotionPlayer';
-import { GroundContactService } from '../motion/GroundContactService';
+import {
+  GroundContactService,
+  type FootSoleDefinition,
+} from '../motion/GroundContactService';
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
 import { SmplMotionPlayer } from '../motion/SmplMotionPlayer';
 import { SceneController } from '../viewer/SceneController';
@@ -957,6 +960,11 @@ export class AppController {
   private readonly alignLeftFootButton: HTMLButtonElement;
   private readonly alignRightFootButton: HTMLButtonElement;
   private readonly footAlignSmoothFramesInput: HTMLInputElement;
+  private readonly comOffsetXInput: HTMLInputElement;
+  private readonly comOffsetYInput: HTMLInputElement;
+  private readonly comOffsetZInput: HTMLInputElement;
+  private readonly comFootLockSelect: HTMLSelectElement;
+  private readonly applyComAdjustmentButton: HTMLButtonElement;
   private readonly modePropsPanel: HTMLElement;
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
@@ -1326,6 +1334,191 @@ export class AppController {
     }
   }
 
+  private readonly onApplyComAdjustmentClick = (): void => {
+    void this.applyCenterOfMassAdjustment();
+  };
+
+  private captureFootSolePose(
+    sole: FootSoleDefinition,
+    robot: LoadedRobotResult['robot'],
+  ): {
+    position: { x: number; y: number; z: number };
+    normal: { x: number; y: number; z: number };
+  } {
+    robot.updateMatrixWorld?.(true);
+    const position = new Vector3(
+      sole.localCenter.x,
+      sole.localCenter.y,
+      sole.localCenter.z,
+    ).applyMatrix4(sole.link.matrixWorld);
+    const normal = new Vector3(0, 0, 1)
+      .transformDirection(sole.link.matrixWorld)
+      .normalize();
+    return {
+      position: { x: position.x, y: position.y, z: position.z },
+      normal: { x: normal.x, y: normal.y, z: normal.z },
+    };
+  }
+
+  private getSmoothingWindow(
+    currentFrame: number,
+    smoothFrames: number,
+  ): { start: number; end: number } {
+    let start = Math.max(0, currentFrame - smoothFrames);
+    let end = Math.min(this.motionPlayer.getFrameCount() - 1, currentFrame + smoothFrames);
+    for (const keyframe of [...this.keyframes].sort((left, right) => left - right)) {
+      if (keyframe < currentFrame) {
+        start = Math.max(start, keyframe);
+      } else if (keyframe > currentFrame) {
+        end = Math.min(end, keyframe);
+        break;
+      }
+    }
+    return { start, end };
+  }
+
+  private async applyCenterOfMassAdjustment(): Promise<void> {
+    const loadedRobot = this.lastLoadResult;
+    const clip = this.currentMotionClip;
+    if (!loadedRobot || !clip || !isUrdfMotionKind(this.currentMotionKind)) {
+      return;
+    }
+    const offset = new Vector3(
+      Number(this.comOffsetXInput.value),
+      Number(this.comOffsetYInput.value),
+      Number(this.comOffsetZInput.value),
+    );
+    if (![offset.x, offset.y, offset.z].every(Number.isFinite)) {
+      window.alert('CoM offsets must be finite numbers.');
+      return;
+    }
+    if (offset.lengthSq() < 1e-12) {
+      window.alert('Enter a non-zero CoM offset before applying.');
+      return;
+    }
+    const lockMode = this.comFootLockSelect.value as 'left' | 'right' | 'both';
+    const sides: FootSide[] =
+      lockMode === 'both' ? ['left', 'right'] : [lockMode];
+    const soles = new Map<FootSide, FootSoleDefinition>();
+    for (const side of sides) {
+      const sole = this.groundContactService.getFootSole(side);
+      if (!sole) {
+        window.alert(`Could not resolve the ${side} foot sole outline.`);
+        return;
+      }
+      soles.set(side, sole);
+    }
+    const smoothFrames = Math.max(
+      0,
+      Math.min(200, Math.round(Number(this.footAlignSmoothFramesInput.value) || 0)),
+    );
+    const currentFrame = this.motionPlayer.getCurrentFrame();
+    const { start, end } = this.getSmoothingWindow(currentFrame, smoothFrames);
+    const stride = clip.stride;
+    const snapshot = clip.data.slice(start * stride, (end + 1) * stride);
+    const targets = new Map<
+      number,
+      Map<
+        FootSide,
+        {
+          position: { x: number; y: number; z: number };
+          normal: { x: number; y: number; z: number };
+        }
+      >
+    >();
+    this.pauseActiveMotion();
+    for (let frame = start; frame <= end; frame += 1) {
+      this.motionPlayer.seek(frame);
+      const frameTargets = new Map();
+      for (const side of sides) {
+        frameTargets.set(
+          side,
+          this.captureFootSolePose(soles.get(side)!, loadedRobot.robot),
+        );
+      }
+      targets.set(frame, frameTargets);
+    }
+    this.motionPlayer.seek(currentFrame);
+
+    const hadKeyframe = this.keyframes.has(currentFrame);
+    const originalText = this.applyComAdjustmentButton.textContent;
+    this.applyComAdjustmentButton.disabled = true;
+    this.alignLeftFootButton.disabled = true;
+    this.alignRightFootButton.disabled = true;
+    this.applyComAdjustmentButton.textContent = 'Applying CoM…';
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    try {
+      const modelRoot = loadedRobot.robot.parent as any;
+      const localOffset = offset.clone();
+      if (typeof modelRoot?.getWorldQuaternion === 'function') {
+        const modelQuaternion = modelRoot.getWorldQuaternion(new Quaternion());
+        localOffset.applyQuaternion(modelQuaternion.invert());
+      }
+      const rootPosition = this.motionPlayer.getRootPosition();
+      this.motionPlayer.setRootPosition(
+        rootPosition.x + localOffset.x,
+        rootPosition.y + localOffset.y,
+        rootPosition.z + localOffset.z,
+      );
+      this.keyframes.add(currentFrame);
+      for (const axis of ['x', 'y', 'z']) {
+        this.smoothRootAxis(axis, currentFrame, smoothFrames, smoothFrames);
+      }
+
+      const frameTotal = end - start + 1;
+      for (let frame = start; frame <= end; frame += 1) {
+        this.motionPlayer.seek(frame);
+        for (const side of sides) {
+          const target = targets.get(frame)?.get(side);
+          if (!target) {
+            continue;
+          }
+          const result = this.footGroundAlignmentService.align(
+            loadedRobot.robot,
+            side,
+            soles.get(side)!,
+            target.position.y,
+            target,
+          );
+          if (!result.success) {
+            throw new Error(
+              `Frame ${frame + 1}, ${side} foot lock failed:\n${result.reason ?? 'IK did not converge.'}`,
+            );
+          }
+          for (const [jointName, value] of Object.entries(result.jointValues)) {
+            this.motionPlayer.setJointValue(jointName, value);
+          }
+        }
+        this.applyComAdjustmentButton.textContent =
+          `Locking Feet ${frame - start + 1}/${frameTotal}…`;
+        if ((frame - start) % 4 === 3) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+      }
+      this.motionPlayer.seek(currentFrame);
+      this.updateKeyframeMarkers();
+      this.comOffsetXInput.value = '0';
+      this.comOffsetYInput.value = '0';
+      this.comOffsetZInput.value = '0';
+      if (this.showCenterOfMass) {
+        this.rebuildCenterOfMassTrail();
+        this.updateCenterOfMassVisualization();
+      }
+      this.updateGroundContactVisualization();
+    } catch (error) {
+      clip.data.set(snapshot, start * stride);
+      if (!hadKeyframe) {
+        this.keyframes.delete(currentFrame);
+      }
+      this.motionPlayer.seek(currentFrame);
+      this.updateKeyframeMarkers();
+      window.alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.applyComAdjustmentButton.textContent = originalText;
+      this.syncVisibilityButtons();
+    }
+  }
+
   private readonly onModePropsSmplRenderClick = (): void => {
     this.toggleSmplDisplayMode();
   };
@@ -1487,6 +1680,12 @@ export class AppController {
     this.alignRightFootButton = requireElement<HTMLButtonElement>('align-right-foot-btn');
     this.footAlignSmoothFramesInput =
       requireElement<HTMLInputElement>('foot-align-smooth-frames');
+    this.comOffsetXInput = requireElement<HTMLInputElement>('com-offset-x');
+    this.comOffsetYInput = requireElement<HTMLInputElement>('com-offset-y');
+    this.comOffsetZInput = requireElement<HTMLInputElement>('com-offset-z');
+    this.comFootLockSelect = requireElement<HTMLSelectElement>('com-foot-lock');
+    this.applyComAdjustmentButton =
+      requireElement<HTMLButtonElement>('apply-com-adjustment-btn');
     this.modePropsPanel = requireElement<HTMLElement>('mode-props-panel');
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
@@ -1650,6 +1849,10 @@ export class AppController {
     this.groundContactsButton.addEventListener('click', this.onGroundContactsClick);
     this.alignLeftFootButton.addEventListener('click', this.onAlignLeftFootClick);
     this.alignRightFootButton.addEventListener('click', this.onAlignRightFootClick);
+    this.applyComAdjustmentButton.addEventListener(
+      'click',
+      this.onApplyComAdjustmentClick,
+    );
     this.urdfSelect.addEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.addEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
@@ -1740,6 +1943,10 @@ export class AppController {
     this.groundContactsButton.removeEventListener('click', this.onGroundContactsClick);
     this.alignLeftFootButton.removeEventListener('click', this.onAlignLeftFootClick);
     this.alignRightFootButton.removeEventListener('click', this.onAlignRightFootClick);
+    this.applyComAdjustmentButton.removeEventListener(
+      'click',
+      this.onApplyComAdjustmentClick,
+    );
     this.urdfSelect.removeEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.removeEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.removeEventListener('click', this.onMotionPlayClick);
@@ -4333,6 +4540,14 @@ export class AppController {
     this.alignLeftFootButton.disabled = !canAlignFeet;
     this.alignRightFootButton.disabled = !canAlignFeet;
     this.footAlignSmoothFramesInput.disabled = !canAlignFeet;
+    this.comOffsetXInput.disabled = !canAlignFeet;
+    this.comOffsetYInput.disabled = !canAlignFeet;
+    this.comOffsetZInput.disabled = !canAlignFeet;
+    this.comFootLockSelect.disabled = !canAlignFeet;
+    this.applyComAdjustmentButton.disabled = !canAlignFeet;
+    this.applyComAdjustmentButton.title = canAlignFeet
+      ? 'Offset the pelvis/CoM while preserving each locked foot pose throughout the smoothing window.'
+      : 'CoM adjustment requires an editable URDF motion with resolved foot geometry.';
   }
 
   private syncMotionControls(): void {

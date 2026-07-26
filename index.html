@@ -204,6 +204,23 @@
               />
               <span>frames</span>
             </div>
+            <div class="com-adjust-controls">
+              <span>CoM offset</span>
+              <label for="com-offset-x">X</label>
+              <input id="com-offset-x" type="number" step="0.005" value="0" />
+              <label for="com-offset-y">Y</label>
+              <input id="com-offset-y" type="number" step="0.005" value="0" />
+              <label for="com-offset-z">Z</label>
+              <input id="com-offset-z" type="number" step="0.005" value="0" />
+              <select id="com-foot-lock">
+                <option value="both">Lock Both Feet</option>
+                <option value="left">Lock Left Foot</option>
+                <option value="right">Lock Right Foot</option>
+              </select>
+              <button id="apply-com-adjustment-btn" type="button" class="toggle-chip">
+                Apply CoM
+              </button>
+            </div>
             <p class="motion-controls__export-info">
               Export supports CSV / PKL plus Tiangong3 UFO Training PKL /
               Reference NPZ.

@@ -19,6 +19,11 @@ export interface FootAlignmentResult {
   reason?: string;
 }
 
+export interface FootAlignmentTarget {
+  position?: { x: number; y: number; z: number };
+  normal?: { x: number; y: number; z: number };
+}
+
 const LEG_JOINT_NAMES: Record<FootSide, string[]> = {
   left: [
     'hip_pitch_l_joint',
@@ -75,6 +80,7 @@ export class FootGroundAlignmentService {
     side: FootSide,
     sole: FootSoleDefinition,
     groundHeight: number,
+    target?: FootAlignmentTarget,
   ): FootAlignmentResult {
     const jointNames = LEG_JOINT_NAMES[side];
     const joints = jointNames.map((name) => (robot.joints as any)?.[name]);
@@ -136,10 +142,21 @@ export class FootGroundAlignmentService {
     let bestEffortHorizontal = Number.POSITIVE_INFINITY;
     let bestEffortOrientation = Number.POSITIVE_INFINITY;
     let initialFootHeight = Number.POSITIVE_INFINITY;
+    const targetPosition = new Vector3();
+    const targetNormal = new Vector3(0, 1, 0);
     try {
       const initialPose = readPose();
       initialFootHeight = initialPose.position.y;
-      const up = new Vector3(0, 1, 0);
+      targetPosition.set(
+        target?.position?.x ?? initialPose.position.x,
+        target?.position?.y ?? groundHeight,
+        target?.position?.z ?? initialPose.position.z,
+      );
+      if (target?.normal) {
+        targetNormal
+          .set(target.normal.x, target.normal.y, target.normal.z)
+          .normalize();
+      }
       const orientationWeight = 0.18;
       const horizontalWeight = 0.35;
       const epsilon = 1e-4;
@@ -147,16 +164,18 @@ export class FootGroundAlignmentService {
 
       for (iterations = 0; iterations < 60; iterations += 1) {
         const pose = readPose();
-        const heightDelta = groundHeight - pose.position.y;
-        const horizontalDeltaX = initialPose.position.x - pose.position.x;
-        const horizontalDeltaZ = initialPose.position.z - pose.position.z;
+        const heightDelta = targetPosition.y - pose.position.y;
+        const horizontalDeltaX = targetPosition.x - pose.position.x;
+        const horizontalDeltaZ = targetPosition.z - pose.position.z;
         horizontalError = Math.hypot(horizontalDeltaX, horizontalDeltaZ);
         heightError = Math.abs(heightDelta);
-        const normalCorrection = new Vector3().crossVectors(pose.normal, up);
+        const normalCorrection = new Vector3().crossVectors(pose.normal, targetNormal);
         positionError = Math.hypot(heightDelta, horizontalError);
-        orientationError = Math.acos(Math.max(-1, Math.min(1, pose.normal.dot(up))));
-        sideTiltError = Math.abs(Math.atan2(pose.normal.x, pose.normal.y));
-        forwardTiltError = Math.abs(Math.atan2(pose.normal.z, pose.normal.y));
+        orientationError = Math.acos(
+          Math.max(-1, Math.min(1, pose.normal.dot(targetNormal))),
+        );
+        sideTiltError = Math.abs(normalCorrection.z);
+        forwardTiltError = Math.abs(normalCorrection.x);
         const improvesHeight =
           heightError < bestEffortHeight - 1e-9 &&
           pose.position.y < initialFootHeight - 1e-9;
@@ -239,17 +258,21 @@ export class FootGroundAlignmentService {
         }
       }
       const finalPose = readPose();
-      heightError = Math.abs(finalPose.position.y - groundHeight);
+      heightError = Math.abs(finalPose.position.y - targetPosition.y);
       horizontalError = Math.hypot(
-        finalPose.position.x - initialPose.position.x,
-        finalPose.position.z - initialPose.position.z,
+        finalPose.position.x - targetPosition.x,
+        finalPose.position.z - targetPosition.z,
       );
       positionError = Math.hypot(heightError, horizontalError);
       orientationError = Math.acos(
-        Math.max(-1, Math.min(1, finalPose.normal.dot(new Vector3(0, 1, 0)))),
+        Math.max(-1, Math.min(1, finalPose.normal.dot(targetNormal))),
       );
-      sideTiltError = Math.abs(Math.atan2(finalPose.normal.x, finalPose.normal.y));
-      forwardTiltError = Math.abs(Math.atan2(finalPose.normal.z, finalPose.normal.y));
+      const finalNormalCorrection = new Vector3().crossVectors(
+        finalPose.normal,
+        targetNormal,
+      );
+      sideTiltError = Math.abs(finalNormalCorrection.z);
+      forwardTiltError = Math.abs(finalNormalCorrection.x);
       const finalImprovesHeight =
         heightError < bestEffortHeight - 1e-9 &&
         finalPose.position.y < initialFootHeight - 1e-9;
@@ -277,16 +300,16 @@ export class FootGroundAlignmentService {
       if (fallbackValues) {
         fallbackValues.forEach((value, index) => applyJoint(index, value));
         const fallbackPose = readPose();
-        heightError = Math.abs(fallbackPose.position.y - groundHeight);
+        heightError = Math.abs(fallbackPose.position.y - targetPosition.y);
         horizontalError = bestEffortHorizontal;
         orientationError = bestEffortOrientation;
         positionError = Math.hypot(heightError, horizontalError);
-        sideTiltError = Math.abs(
-          Math.atan2(fallbackPose.normal.x, fallbackPose.normal.y),
+        const fallbackNormalCorrection = new Vector3().crossVectors(
+          fallbackPose.normal,
+          targetNormal,
         );
-        forwardTiltError = Math.abs(
-          Math.atan2(fallbackPose.normal.z, fallbackPose.normal.y),
-        );
+        sideTiltError = Math.abs(fallbackNormalCorrection.z);
+        forwardTiltError = Math.abs(fallbackNormalCorrection.x);
         originalValues.forEach((value, index) => applyJoint(index, value));
         robot.updateMatrixWorld?.(true);
       }

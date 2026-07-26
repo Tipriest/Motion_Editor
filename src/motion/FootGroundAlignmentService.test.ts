@@ -36,7 +36,7 @@ describe('FootGroundAlignmentService', () => {
     ).toBeNull();
   });
 
-  it('aligns sole height and normal without constraining horizontal pose', () => {
+  it('aligns an explicit sole pose target for foot locking', () => {
     const names = [
       'hip_pitch_l_joint',
       'hip_roll_l_joint',
@@ -101,7 +101,11 @@ describe('FootGroundAlignmentService', () => {
         link: footLink,
         localCenter: { x: 0, y: 0, z: 0 },
       },
-      0,
+      123,
+      {
+        position: { x: 0.02, y: 0, z: -0.02 },
+        normal: { x: 0, y: 1, z: 0 },
+      },
     );
 
     expect(result.success).toBe(true);
