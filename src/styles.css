@@ -1090,7 +1090,70 @@ body {
 }
 
 .motion-timeline__track {
+  position: relative;
   min-width: 0;
+}
+
+.motion-timeline__limit-summary {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.motion-timeline__limit-summary[data-has-violations='true'] {
+  color: #ff8b7c;
+}
+
+.motion-timeline__limit-markers {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 7px;
+  left: 7px;
+  height: 10px;
+  pointer-events: none;
+}
+
+.motion-timeline__limit-marker {
+  position: absolute;
+  top: 0;
+  width: 5px;
+  height: 8px;
+  border: 0;
+  border-radius: 2px 2px 50% 50%;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  box-shadow: 0 0 5px currentColor;
+}
+
+.motion-timeline__limit-marker--violation {
+  color: #ff554d;
+  background: #ff554d;
+}
+
+.motion-timeline__limit-marker--near {
+  color: #ffd24d;
+  background: #ffd24d;
+}
+
+.motion-timeline__limit-marker:hover,
+.motion-timeline__limit-marker:focus-visible {
+  height: 12px;
+  outline: 1px solid #ffffff;
+  outline-offset: 1px;
+}
+
+.joint-item--limit-violation {
+  background: rgba(255, 85, 77, 0.22) !important;
+  box-shadow: inset 3px 0 #ff554d;
+}
+
+.joint-item--limit-near {
+  background: rgba(255, 210, 77, 0.2) !important;
+  box-shadow: inset 3px 0 #ffd24d;
 }
 
 .motion-timeline__markers {

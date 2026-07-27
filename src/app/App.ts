@@ -54,6 +54,11 @@ import {
   GroundContactService,
   type FootSoleDefinition,
 } from '../motion/GroundContactService';
+import {
+  JointLimitAnalysisService,
+  type JointLimitAnalysisResult,
+  type JointLimitHit,
+} from '../motion/JointLimitAnalysisService';
 import { formatMissingObjectModelWarning } from '../motion/objectWarnings';
 import { SmplMotionPlayer } from '../motion/SmplMotionPlayer';
 import { SceneController } from '../viewer/SceneController';
@@ -955,6 +960,7 @@ export class AppController {
   private readonly groundContactService: GroundContactService;
   private readonly footGroundAlignmentService: FootGroundAlignmentService;
   private readonly footLockService: FootLockService;
+  private readonly jointLimitAnalysisService: JointLimitAnalysisService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -996,6 +1002,7 @@ export class AppController {
   private readonly motionFrameSlider: HTMLInputElement;
   private readonly motionTitle: HTMLParagraphElement;
   private readonly motionFrameLabel: HTMLSpanElement;
+  private readonly jointLimitSummary: HTMLSpanElement;
   private readonly folderInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
   private readonly pickFolderButton: HTMLButtonElement;
@@ -1127,6 +1134,9 @@ export class AppController {
   private isObjCatalogLoading = false;
   private keyframes: Set<number> = new Set();
   private keyframeMarkersContainer: HTMLElement | null = null;
+  private readonly jointLimitMarkersContainer: HTMLElement;
+  private jointLimitAnalysis: JointLimitAnalysisResult | null = null;
+  private jointLimitAnalysisTimer: number | null = null;
 
   private readonly onWindowResize = (): void => {
     this.sceneController.resize();
@@ -1334,6 +1344,7 @@ export class AppController {
       }
       this.motionPlayer.seek(currentFrame);
       this.updateKeyframeMarkers();
+      this.rebuildJointLimitAnalysis();
       if (this.showCenterOfMass) {
         this.rebuildCenterOfMassTrail();
         this.updateCenterOfMassVisualization();
@@ -1605,6 +1616,7 @@ export class AppController {
       this.keyframes.add(endFrame);
       this.motionPlayer.seek(startFrame);
       this.updateKeyframeMarkers();
+      this.rebuildJointLimitAnalysis();
       if (this.showCenterOfMass) {
         this.rebuildCenterOfMassTrail();
         this.updateCenterOfMassVisualization();
@@ -1779,6 +1791,7 @@ export class AppController {
       }
       this.motionPlayer.seek(currentFrame);
       this.updateKeyframeMarkers();
+      this.rebuildJointLimitAnalysis();
       this.comOffsetXInput.value = '0';
       this.comOffsetYInput.value = '0';
       this.comOffsetZInput.value = '0';
@@ -1986,6 +1999,10 @@ export class AppController {
     this.motionFrameSlider = requireElement<HTMLInputElement>('motion-frame-slider');
     this.motionTitle = requireElement<HTMLParagraphElement>('motion-title');
     this.motionFrameLabel = requireElement<HTMLSpanElement>('motion-frame-label');
+    this.jointLimitSummary =
+      requireElement<HTMLSpanElement>('joint-limit-summary');
+    this.jointLimitMarkersContainer =
+      requireElement<HTMLElement>('joint-limit-markers');
     this.folderInput = requireElement<HTMLInputElement>('folder-input');
     this.fileInput = requireElement<HTMLInputElement>('file-input');
     this.pickFolderButton = requireElement<HTMLButtonElement>('pick-folder-btn');
@@ -2045,6 +2062,7 @@ export class AppController {
     this.groundContactService = new GroundContactService();
     this.footGroundAlignmentService = new FootGroundAlignmentService();
     this.footLockService = new FootLockService();
+    this.jointLimitAnalysisService = new JointLimitAnalysisService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
@@ -2666,6 +2684,7 @@ export class AppController {
     this.recoverableDropHint = null;
     this.showJointPanel();
     this.renderReadyState(loadedRobotResult);
+    this.rebuildJointLimitAnalysis();
   }
 
   private async loadMotionFromDroppedFiles(
@@ -3855,6 +3874,12 @@ export class AppController {
     this.smplMotionPlayer.pause();
     this.smplMotionPlayer.load(null, null);
     this.currentMotionClip = null;
+    this.jointLimitAnalysis = null;
+    if (this.jointLimitAnalysisTimer !== null) {
+      window.clearTimeout(this.jointLimitAnalysisTimer);
+      this.jointLimitAnalysisTimer = null;
+    }
+    this.renderJointLimitMarkers();
     this.currentBvhMotion = null;
     this.currentBvhFileMap = null;
     this.currentSmplModel = null;
@@ -5523,8 +5548,138 @@ export class AppController {
       this.motionPlayer.setFrameCount(newFrameCount, insertPosition);
       this.syncMotionControls();
       this.updateKeyframeMarkers();
+      this.rebuildJointLimitAnalysis();
     }
   };
+
+  private scheduleJointLimitAnalysis(delayMs = 120): void {
+    if (this.jointLimitAnalysisTimer !== null) {
+      window.clearTimeout(this.jointLimitAnalysisTimer);
+    }
+    this.jointLimitAnalysisTimer = window.setTimeout(() => {
+      this.jointLimitAnalysisTimer = null;
+      this.rebuildJointLimitAnalysis();
+    }, delayMs);
+  }
+
+  private rebuildJointLimitAnalysis(): void {
+    if (
+      !this.currentMotionClip ||
+      !this.lastLoadResult ||
+      !isUrdfMotionKind(this.currentMotionKind)
+    ) {
+      this.jointLimitAnalysis = null;
+    } else {
+      this.jointLimitAnalysis = this.jointLimitAnalysisService.analyze(
+        this.currentMotionClip,
+        this.lastLoadResult.robot,
+      );
+    }
+    this.renderJointLimitMarkers();
+  }
+
+  private formatJointLimitNumber(hit: JointLimitHit, value: number): string {
+    if (!Number.isFinite(value)) {
+      return value < 0 ? '-∞' : '+∞';
+    }
+    if (hit.jointType === 'prismatic') {
+      return `${(value * 1_000).toFixed(1)} mm`;
+    }
+    return `${((value * 180) / Math.PI).toFixed(2)}°`;
+  }
+
+  private formatJointLimitTooltip(
+    frameIndex: number,
+    hits: readonly JointLimitHit[],
+  ): string {
+    const violationCount = hits.filter(({ status }) => status === 'violation').length;
+    const lines = [
+      `Frame ${frameIndex + 1} · ${violationCount > 0 ? `${violationCount} violation${violationCount > 1 ? 's' : ''}` : `${hits.length} near limit`}`,
+    ];
+    for (const hit of hits.slice(0, 8)) {
+      const value = this.formatJointLimitNumber(hit, hit.value);
+      const limit = this.formatJointLimitNumber(hit, hit.limit);
+      const distance = this.formatJointLimitNumber(hit, hit.distance);
+      lines.push(
+        hit.status === 'violation'
+          ? `${hit.jointName}: ${value}; ${hit.boundary} ${limit}; exceeded ${distance}`
+          : `${hit.jointName}: ${value}; ${distance} remaining to ${hit.boundary} limit ${limit}`,
+      );
+    }
+    if (hits.length > 8) {
+      lines.push(`…and ${hits.length - 8} more joints`);
+    }
+    lines.push('Click to seek and highlight the most severe joint.');
+    return lines.join('\n');
+  }
+
+  private renderJointLimitMarkers(): void {
+    this.jointLimitMarkersContainer.innerHTML = '';
+    const analysis = this.jointLimitAnalysis;
+    const frameCount = this.currentMotionClip?.frameCount ?? 0;
+    if (!analysis || frameCount <= 0) {
+      this.jointLimitSummary.hidden = true;
+      this.jointLimitSummary.textContent = '';
+      return;
+    }
+    this.jointLimitSummary.hidden =
+      analysis.violationFrameCount === 0 && analysis.nearFrameCount === 0;
+    this.jointLimitSummary.dataset.hasViolations =
+      analysis.violationFrameCount > 0 ? 'true' : 'false';
+    this.jointLimitSummary.textContent =
+      `Limits: ${analysis.violationFrameCount} red · ${analysis.nearFrameCount} yellow`;
+
+    const entries = [...analysis.byFrame.entries()];
+    const maxMarkers = 800;
+    const displayEntries =
+      entries.length <= maxMarkers
+        ? entries
+        : [...entries.reduce((bins, entry) => {
+            const bin = Math.min(
+              maxMarkers - 1,
+              Math.floor((entry[0] / Math.max(frameCount - 1, 1)) * maxMarkers),
+            );
+            const existing = bins.get(bin);
+            const entryHasViolation = entry[1].some(
+              ({ status }) => status === 'violation',
+            );
+            const existingHasViolation = existing?.[1].some(
+              ({ status }) => status === 'violation',
+            );
+            if (
+              !existing ||
+              (entryHasViolation && !existingHasViolation) ||
+              (entryHasViolation === existingHasViolation &&
+                entry[1][0].distance > existing[1][0].distance)
+            ) {
+              bins.set(bin, entry);
+            }
+            return bins;
+          }, new Map<number, [number, JointLimitHit[]]>()).values()];
+
+    const maxFrame = Math.max(frameCount - 1, 1);
+    for (const [frameIndex, hits] of displayEntries) {
+      const hasViolation = hits.some(({ status }) => status === 'violation');
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className =
+        `motion-timeline__limit-marker motion-timeline__limit-marker--${hasViolation ? 'violation' : 'near'}`;
+      marker.style.left = `${(frameIndex / maxFrame) * 100}%`;
+      marker.title = this.formatJointLimitTooltip(frameIndex, hits);
+      marker.setAttribute(
+        'aria-label',
+        `Frame ${frameIndex + 1}: ${hasViolation ? 'joint limit violation' : 'joint near limit'}`,
+      );
+      marker.addEventListener('click', () => {
+        this.motionPlayer.seek(frameIndex);
+        const primaryHit =
+          hits.find(({ status }) => status === 'violation') ?? hits[0];
+        this.sceneController.highlightJoint(primaryHit.jointName);
+        this.scrollToJointControl(primaryHit.jointName, primaryHit.status);
+      });
+      this.jointLimitMarkersContainer.appendChild(marker);
+    }
+  }
 
   private updateKeyframeMarkers(): void {
     if (!this.keyframeMarkersContainer) {
@@ -6787,7 +6942,10 @@ export class AppController {
   }
 
   // 滚动到对应的关节控制面板
-  private scrollToJointControl(jointName: string): void {
+  private scrollToJointControl(
+    jointName: string,
+    limitStatus?: 'near' | 'violation',
+  ): void {
     // 查找包含该关节名称的关节项
     const jointItems = Array.from(this.jointList.querySelectorAll('.joint-item'));
     let targetItem: HTMLElement | null = null;
@@ -6808,13 +6966,24 @@ export class AppController {
         inline: 'nearest'
       });
 
-      // 添加视觉效果，例如闪烁
-      (targetItem as HTMLElement).style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
+      targetItem.classList.remove(
+        'joint-item--limit-near',
+        'joint-item--limit-violation',
+      );
+      if (limitStatus) {
+        targetItem.classList.add(`joint-item--limit-${limitStatus}`);
+      } else {
+        targetItem.style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
+      }
       setTimeout(() => {
         if (targetItem) {
           targetItem.style.backgroundColor = '';
+          targetItem.classList.remove(
+            'joint-item--limit-near',
+            'joint-item--limit-violation',
+          );
         }
-      }, 500);
+      }, limitStatus ? 1_500 : 500);
     }
   }
 
@@ -6827,6 +6996,7 @@ export class AppController {
     jointNames.forEach((jointName, index) => {
       const jointItem = document.createElement('div');
       jointItem.className = 'joint-item';
+      jointItem.dataset.jointName = jointName;
 
       const jointNameSpan = document.createElement('span');
       jointNameSpan.className = 'joint-name';
@@ -6845,6 +7015,7 @@ export class AppController {
         if (!isNaN(value)) {
           this.sceneController.highlightJoint(jointName);
           this.motionPlayer.setJointValue(jointName, value);
+          this.scheduleJointLimitAnalysis();
         }
       });
 
@@ -6867,6 +7038,7 @@ export class AppController {
         if (!isNaN(value)) {
           this.sceneController.highlightJoint(jointName);
           this.motionPlayer.setJointValue(jointName, value);
+          this.scheduleJointLimitAnalysis();
         }
       });
 
@@ -6958,6 +7130,7 @@ export class AppController {
 
         // 执行平滑操作
         this.motionPlayer.smoothJoint(jointName, currentFrame, framesBefore, framesAfter, Array.from(this.keyframes));
+        this.rebuildJointLimitAnalysis();
 
         // 短暂延迟后恢复按钮状态
         setTimeout(() => {

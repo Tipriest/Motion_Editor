@@ -340,6 +340,7 @@
           <span id="motion-frame-label" class="motion-controls__frame"
             >Frame 0 / 0</span
           >
+          <span id="joint-limit-summary" class="motion-timeline__limit-summary" hidden></span>
         </div>
         <div class="motion-timeline__transport" aria-label="Playback controls">
           <button id="motion-reset-btn" type="button" class="toggle-chip">
@@ -373,6 +374,11 @@
           &lt;
         </button>
         <div class="motion-timeline__track">
+          <div
+            id="joint-limit-markers"
+            class="motion-timeline__limit-markers"
+            aria-label="Joint limit warnings"
+          ></div>
           <div id="keyframe-markers" class="motion-timeline__markers"></div>
           <input
             id="motion-frame-slider"
