@@ -16,4 +16,16 @@ describe('buildMotionExportFileName', () => {
       'boxing_1.25x.csv',
     );
   });
+
+  it('places the mirror suffix before the format suffix', () => {
+    expect(
+      buildMotionExportFileName(
+        'turn_right.pkl',
+        1,
+        'ufo_training',
+        'pkl',
+        { mirrored: true },
+      ),
+    ).toBe('turn_right_1x_mirror_ufo_training.pkl');
+  });
 });

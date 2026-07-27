@@ -19,7 +19,9 @@ export function buildMotionExportFileName(
   playbackSpeed: number,
   formatSuffix: string | null,
   extension: string,
+  options: { mirrored?: boolean } = {},
 ): string {
+  const mirrorSuffix = options.mirrored ? '_mirror' : '';
   const suffix = formatSuffix ? `_${formatSuffix}` : '';
-  return `${sanitizeBaseName(motionName)}_${formatSpeed(playbackSpeed)}${suffix}.${extension}`;
+  return `${sanitizeBaseName(motionName)}_${formatSpeed(playbackSpeed)}${mirrorSuffix}${suffix}.${extension}`;
 }

@@ -19,6 +19,7 @@ import { buildMotionExportFileName } from '../io/motion/ExportFileName';
 import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
+import { mirrorMotionClipSagittal } from '../io/motion/MotionClipSagittalMirror';
 import { RobotStateNpzMotionService } from '../io/motion/RobotStateNpzMotionService';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import {
@@ -6605,6 +6606,30 @@ export class AppController {
     formatField.appendChild(formatSelect);
     settingsPanel.appendChild(formatField);
 
+    const mirrorField = document.createElement('label');
+    mirrorField.style.display = 'flex';
+    mirrorField.style.alignItems = 'center';
+    mirrorField.style.gap = '0.5rem';
+    mirrorField.style.color = 'var(--text-main)';
+    mirrorField.style.fontSize = '0.8rem';
+    mirrorField.title =
+      'Reflect across the robot X-Z plane: X forward, Y left, Z up. The editor motion is not changed.';
+    const mirrorCheckbox = document.createElement('input');
+    mirrorCheckbox.type = 'checkbox';
+    mirrorCheckbox.style.accentColor = 'var(--accent)';
+    mirrorField.append(
+      mirrorCheckbox,
+      document.createTextNode('Mirror Left ↔ Right (export only)'),
+    );
+    settingsPanel.appendChild(mirrorField);
+
+    const limitWarningText = document.createElement('p');
+    limitWarningText.style.display = 'none';
+    limitWarningText.style.margin = '0';
+    limitWarningText.style.color = '#ffd24d';
+    limitWarningText.style.fontSize = '0.78rem';
+    settingsPanel.appendChild(limitWarningText);
+
     const errorText = document.createElement('p');
     errorText.setAttribute('role', 'alert');
     errorText.style.display = 'none';
@@ -6658,7 +6683,12 @@ export class AppController {
         data: clip.data.slice(startOffset, endOffset),
       };
       const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
-      return retimeMotionClip(rangedClip, selectedFps, playbackSpeed);
+      const retimedClip = retimeMotionClip(rangedClip, selectedFps, playbackSpeed);
+      return mirrorCheckbox.checked
+        ? mirrorMotionClipSagittal(retimedClip, {
+            robot: this.lastLoadResult?.robot,
+          })
+        : retimedClip;
     };
 
     const applyPreviewClip = (): void => {
@@ -6674,7 +6704,29 @@ export class AppController {
           nextClip.frameCount > 1 ? (nextClip.frameCount - 1) / nextClip.fps : 0;
         outputSummary.textContent =
           `${nextClip.frameCount} frames · ${duration.toFixed(2)}s · ` +
-          `${nextClip.fps} Hz · ${Number(speedInput.value).toFixed(2)}x`;
+          `${nextClip.fps} Hz · ${Number(speedInput.value).toFixed(2)}x` +
+          (mirrorCheckbox.checked ? ' · Mirrored' : '');
+        if (mirrorCheckbox.checked && this.lastLoadResult) {
+          const limitAnalysis = this.jointLimitAnalysisService.analyze(
+            nextClip,
+            this.lastLoadResult.robot,
+          );
+          if (
+            limitAnalysis.violationFrameCount > 0 ||
+            limitAnalysis.nearFrameCount > 0
+          ) {
+            limitWarningText.textContent =
+              `Mirrored output limits: ${limitAnalysis.violationFrameCount} red frames · ` +
+              `${limitAnalysis.nearFrameCount} yellow frames. Export remains available.`;
+            limitWarningText.style.display = 'block';
+          } else {
+            limitWarningText.style.display = 'none';
+            limitWarningText.textContent = '';
+          }
+        } else {
+          limitWarningText.style.display = 'none';
+          limitWarningText.textContent = '';
+        }
         errorText.style.display = 'none';
       } catch (error) {
         setError(error);
@@ -6750,6 +6802,7 @@ export class AppController {
       input.addEventListener('input', applyPreviewClip);
     }
     fpsSelect.addEventListener('change', applyPreviewClip);
+    mirrorCheckbox.addEventListener('change', applyPreviewClip);
 
     const renderPreview = (): void => {
       if (isClosed) {
@@ -6781,6 +6834,7 @@ export class AppController {
           exportClip,
           selectedFormat,
           Number(speedInput.value),
+          { mirrored: mirrorCheckbox.checked },
         );
         closeDialog();
       } catch (error) {
@@ -6863,6 +6917,7 @@ export class AppController {
     clip: MotionClip,
     format: 'source' | 'ufo-pkl' | 'ufo-npz' = 'source',
     playbackSpeed = 1,
+    options: { mirrored?: boolean } = {},
   ): void {
     let content: string | Uint8Array;
     let fileName: string;
@@ -6876,12 +6931,19 @@ export class AppController {
         playbackSpeed,
         'ufo_training',
         'pkl',
+        options,
       );
       mimeType = 'application/octet-stream';
     } else if (format === 'ufo-npz') {
       console.log('Generating UFO reference NPZ content');
       content = exportUfoReferenceNpz(clip, this.motionPlayer);
-      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'ufo_29dof', 'npz');
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'ufo_29dof',
+        'npz',
+        options,
+      );
       mimeType = 'application/zip';
     } else if (this.currentMotionKind === 'csv') {
       console.log('Generating CSV content');
@@ -6889,7 +6951,13 @@ export class AppController {
       const csvContent = this.csvMotionService.toCsv(clip, robotHeight);
       console.log('CSV content generated, length:', csvContent.length);
       content = csvContent;
-      fileName = buildMotionExportFileName(clip.name, playbackSpeed, null, 'csv');
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        null,
+        'csv',
+        options,
+      );
       mimeType = 'text/csv;charset=utf-8';
     } else if (this.currentMotionKind === 'ufo-training') {
       console.log('Generating UFO MotionLib training PKL content');
@@ -6899,6 +6967,7 @@ export class AppController {
         playbackSpeed,
         'ufo_training',
         'pkl',
+        options,
       );
       mimeType = 'application/octet-stream';
     } else if (this.currentMotionKind === 'gmr' || this.currentMotionKind === 'robot-state') {
@@ -6906,14 +6975,26 @@ export class AppController {
       const pklContent = this.gmrMotionService.toGmrPkl(clip);
       console.log('PKL content generated, length:', pklContent.length);
       content = pklContent;
-      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'gmr', 'pkl');
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'gmr',
+        'pkl',
+        options,
+      );
       mimeType = 'application/octet-stream';
     } else if (this.currentMotionKind === 'mimickit') {
       console.log('Generating MimicKit PKL content');
       const pklContent = this.mimicKitMotionService.toMimicKitPkl(clip);
       console.log('PKL content generated, length:', pklContent.length);
       content = pklContent;
-      fileName = buildMotionExportFileName(clip.name, playbackSpeed, 'mimickit', 'pkl');
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'mimickit',
+        'pkl',
+        options,
+      );
       mimeType = 'application/octet-stream';
     } else {
       console.log('Not a supported motion type for export');
