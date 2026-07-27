@@ -18,6 +18,7 @@ import { CsvMotionService } from '../io/motion/CsvMotionService';
 import { buildMotionExportFileName } from '../io/motion/ExportFileName';
 import { MimicKitMotionService } from '../io/motion/MimicKitMotionService';
 import { GmrMotionService } from '../io/motion/GmrMotionService';
+import { exportGmrNpz } from '../io/motion/GmrNpzService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { mirrorMotionClipSagittal } from '../io/motion/MotionClipSagittalMirror';
 import { RobotStateNpzMotionService } from '../io/motion/RobotStateNpzMotionService';
@@ -69,6 +70,11 @@ import {
   type MotionBrowserAsset,
   type MotionBrowserTreeNode,
 } from './MotionBrowserCatalog';
+import {
+  getExportFormatOptions,
+  type ExportFormatValue,
+  type UrdfMotionKind,
+} from './MotionFormatModes';
 import { getStateCopy } from './state';
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -144,13 +150,6 @@ interface ViewerPresetManifest {
   capturedObjects: PresetAssetFile[];
 }
 
-type UrdfMotionKind =
-  | 'csv'
-  | 'mimickit'
-  | 'gmr'
-  | 'ufo-reference'
-  | 'ufo-training'
-  | 'robot-state';
 type ViewerMotionKind = UrdfMotionKind | 'bvh' | 'smpl';
 
 function isUrdfMotionKind(kind: ViewerMotionKind | null): kind is UrdfMotionKind {
@@ -6674,36 +6673,17 @@ export class AppController {
     formatSelect.style.color = 'var(--text-main)';
     formatSelect.style.font = 'inherit';
 
-    const sourceFormatOption = document.createElement('option');
-    sourceFormatOption.value =
-      this.currentMotionKind === 'ufo-reference' ? 'ufo-npz' : 'source';
-    sourceFormatOption.textContent =
-      this.currentMotionKind === 'csv'
-        ? 'CSV'
-        : this.currentMotionKind === 'mimickit'
-          ? 'MimicKit PKL'
-          : this.currentMotionKind === 'ufo-reference'
-            ? 'UFO Reference NPZ (xmigcs)'
-            : this.currentMotionKind === 'robot-state'
-              ? 'GMR PKL (converted)'
-              : 'GMR PKL';
-    formatSelect.appendChild(sourceFormatOption);
-
     const isTiangong3 =
       this.lastLoadResult?.robotName.toLowerCase().includes('tiangong3') === true ||
       this.selectedUrdfPath?.toLowerCase().includes('/tiangong3/') === true;
-    if (isTiangong3) {
-      const ufoPklOption = document.createElement('option');
-      ufoPklOption.value = 'ufo-pkl';
-      ufoPklOption.textContent = 'UFO Training PKL (MotionLib)';
-      formatSelect.appendChild(ufoPklOption);
-
-      if (this.currentMotionKind !== 'ufo-reference') {
-        const ufoNpzOption = document.createElement('option');
-        ufoNpzOption.value = 'ufo-npz';
-        ufoNpzOption.textContent = 'UFO Reference NPZ (xmigcs)';
-        formatSelect.appendChild(ufoNpzOption);
-      }
+    const exportMotionKind = isUrdfMotionKind(this.currentMotionKind)
+      ? this.currentMotionKind
+      : 'gmr';
+    for (const format of getExportFormatOptions(exportMotionKind, isTiangong3)) {
+      const option = document.createElement('option');
+      option.value = format.value;
+      option.textContent = format.label;
+      formatSelect.appendChild(option);
     }
     formatField.appendChild(formatSelect);
     settingsPanel.appendChild(formatField);
@@ -6926,12 +6906,7 @@ export class AppController {
       event.preventDefault();
       try {
         const exportClip = buildExportClip();
-        const selectedFormat =
-          formatSelect.value === 'ufo-npz'
-            ? 'ufo-npz'
-            : formatSelect.value === 'ufo-pkl'
-              ? 'ufo-pkl'
-              : 'source';
+        const selectedFormat = formatSelect.value as ExportFormatValue;
         this.exportMotionClip(
           exportClip,
           selectedFormat,
@@ -7017,7 +6992,7 @@ export class AppController {
 
   private exportMotionClip(
     clip: MotionClip,
-    format: 'source' | 'ufo-pkl' | 'ufo-npz' = 'source',
+    format: 'source' | 'ufo-pkl' | 'ufo-npz' | 'gmr-npz' = 'source',
     playbackSpeed = 1,
     options: { mirrored?: boolean } = {},
   ): void {
@@ -7036,6 +7011,17 @@ export class AppController {
         options,
       );
       mimeType = 'application/octet-stream';
+    } else if (format === 'gmr-npz') {
+      console.log('Generating GMR root + 29-DOF NPZ content');
+      content = exportGmrNpz(clip);
+      fileName = buildMotionExportFileName(
+        clip.name,
+        playbackSpeed,
+        'gmr',
+        'npz',
+        options,
+      );
+      mimeType = 'application/zip';
     } else if (format === 'ufo-npz') {
       console.log('Generating UFO reference NPZ content');
       content = exportUfoReferenceNpz(clip, this.motionPlayer);
