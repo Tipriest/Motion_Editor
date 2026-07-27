@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { DroppedFileMap } from '../../types/viewer';
 import {
@@ -73,11 +73,26 @@ describe('UfoTrainingPklMotionService', () => {
     });
     const fileMap: DroppedFileMap = new Map([[file.name, file]]);
     const service = new UfoTrainingPklMotionService();
+    const arrayBufferSpy = vi.spyOn(file, 'arrayBuffer');
     const result = await service.loadFromDroppedFiles(fileMap);
+    const second = await service.loadFromDroppedFiles(
+      fileMap,
+      file.name,
+      'a_motion',
+    );
+    const restoredFirst = await service.loadFromDroppedFiles(
+      fileMap,
+      file.name,
+      'z_motion',
+    );
 
     expect(await service.findCompatiblePaths(fileMap)).toEqual([file.name]);
-    expect(result.selectedMotionKey).toBe('a_motion');
-    expect(result.availableMotionKeys).toEqual(['a_motion', 'z_motion']);
+    expect(result.selectedMotionKey).toBe('z_motion');
+    expect(second.selectedMotionKey).toBe('a_motion');
+    expect(second.clip).not.toBe(result.clip);
+    expect(restoredFirst.clip).toBe(result.clip);
+    expect(result.availableMotionKeys).toEqual(['z_motion', 'a_motion']);
+    expect(arrayBufferSpy).toHaveBeenCalledTimes(1);
     expect(result.warnings.join(' ')).toContain('contains 2 motions');
   });
 

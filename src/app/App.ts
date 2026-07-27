@@ -590,6 +590,7 @@ interface SelectableMotionOption {
   selectedMotionPath: string;
   files: PresetAssetFile[];
   bindingTags: string[];
+  ufoTrainingMotionKey?: string;
   description?: string;
 }
 
@@ -1124,6 +1125,8 @@ export class AppController {
   private droppedUrdfFileMap: DroppedFileMap = new Map();
   private droppedSmplModelFileMap: DroppedFileMap = new Map();
   private droppedCapturedObjFileMap: DroppedFileMap = new Map();
+  private droppedMotionFileMap: DroppedFileMap = new Map();
+  private droppedMotionCatalog: SelectableMotionOption[] = [];
   private importedMotionBrowserAssets: MotionBrowserAsset[] = [];
   private motionBrowserSelectedIds = new Set<string>();
   private motionBrowserInspections = new Map<string, MotionBrowserInspection>();
@@ -2213,6 +2216,8 @@ export class AppController {
     this.selectedUrdfPath = null;
     this.selectedModelOptionKey = null;
     this.selectedMotionOptionKey = null;
+    this.droppedMotionFileMap.clear();
+    this.droppedMotionCatalog = [];
     this.selectedCapturedObjPath = null;
     this.lastLoadResult = null;
     this.sceneWarning = null;
@@ -2414,16 +2419,9 @@ export class AppController {
           this.setState('loading', {
             detail: 'Loading UFO Training MotionLib PKL ...',
           });
-          const result = await this.ufoTrainingPklMotionService.loadFromDroppedFiles(
+          await this.loadUfoTrainingMotionFromFileMap(
             fileMap,
             path,
-          );
-          this.applyLoadedUrdfMotion(
-            loadedRobotResult,
-            result.clip,
-            'ufo-training',
-            result.selectedMotionPath,
-            result.warnings,
           );
           return;
         } catch (ufoTrainingError) {
@@ -3481,8 +3479,20 @@ export class AppController {
       return [];
     }
 
-    return this.presetMotionCatalog.filter((option) =>
-      this.isMotionCompatibleWithModel(option, modelOption),
+    const expandedUfoPaths = new Set(
+      this.droppedMotionCatalog
+        .filter(({ ufoTrainingMotionKey }) => Boolean(ufoTrainingMotionKey))
+        .map(({ selectedMotionPath }) => normalizePath(selectedMotionPath)),
+    );
+    return [...this.presetMotionCatalog, ...this.droppedMotionCatalog].filter(
+      (option, index, options) =>
+        this.isMotionCompatibleWithModel(option, modelOption) &&
+        !(
+          option.ufoTrainingMotionKey === undefined &&
+          option.kind === 'pkl' &&
+          expandedUfoPaths.has(normalizePath(option.selectedMotionPath))
+        ) &&
+        options.findIndex(({ key }) => key === option.key) === index,
     );
   }
 
@@ -3625,7 +3635,11 @@ export class AppController {
     });
 
     try {
-      const motionFileMap = await this.fetchPresetFileMap(motionOption.files);
+      const normalizedMotionPath = normalizePath(motionOption.selectedMotionPath);
+      const localMotionFile = this.droppedMotionFileMap.get(normalizedMotionPath);
+      const motionFileMap: DroppedFileMap = localMotionFile
+        ? new Map([[normalizedMotionPath, localMotionFile]])
+        : await this.fetchPresetFileMap(motionOption.files);
       if (motionOption.kind === 'csv') {
         await this.loadMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else if (motionOption.kind === 'mimickit') {
@@ -3633,7 +3647,22 @@ export class AppController {
       } else if (motionOption.kind === 'gmr') {
         await this.loadGmrMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else if (motionOption.kind === 'pkl') {
-        await this.handleDroppedFileMap(motionFileMap);
+        if (motionOption.ufoTrainingMotionKey) {
+          await this.loadUfoTrainingMotionFromFileMap(
+            motionFileMap,
+            motionOption.selectedMotionPath,
+            motionOption.ufoTrainingMotionKey,
+          );
+        } else {
+          try {
+            await this.loadUfoTrainingMotionFromFileMap(
+              motionFileMap,
+              motionOption.selectedMotionPath,
+            );
+          } catch {
+            await this.handleDroppedFileMap(motionFileMap);
+          }
+        }
       } else if (motionOption.kind === 'bvh') {
         await this.loadBvhMotionFromDroppedFiles(motionFileMap, motionOption.selectedMotionPath);
       } else {
@@ -3658,6 +3687,79 @@ export class AppController {
       this.renderObjOptions();
       this.syncPresetControls();
     }
+  }
+
+  private buildUfoTrainingMotionOptionKey(
+    sourcePath: string,
+    motionKey: string,
+  ): string {
+    return `ufo-training:${normalizePath(sourcePath)}::${encodeURIComponent(motionKey)}`;
+  }
+
+  private registerUfoTrainingMotionOptions(
+    fileMap: DroppedFileMap,
+    sourcePath: string,
+    motionKeys: readonly string[],
+    selectedMotionKey: string,
+  ): void {
+    const normalizedPath = normalizePath(sourcePath);
+    const file = fileMap.get(sourcePath) ?? fileMap.get(normalizedPath);
+    if (file) {
+      this.droppedMotionFileMap.set(normalizedPath, file);
+    }
+    this.droppedMotionCatalog = this.droppedMotionCatalog.filter(
+      (option) => normalizePath(option.selectedMotionPath) !== normalizedPath,
+    );
+    const fileName = getBaseName(normalizedPath) || normalizedPath;
+    for (const motionKey of motionKeys) {
+      this.droppedMotionCatalog.push({
+        key: this.buildUfoTrainingMotionOptionKey(normalizedPath, motionKey),
+        label:
+          motionKeys.length > 1
+            ? `UFO PKL · ${fileName} · ${motionKey}`
+            : `UFO PKL · ${fileName}`,
+        kind: 'pkl',
+        selectedMotionPath: normalizedPath,
+        files: [{ path: normalizedPath, mapAs: normalizedPath }],
+        bindingTags: [],
+        ufoTrainingMotionKey: motionKey,
+        description: `UFO Training MotionLib record "${motionKey}"`,
+      });
+    }
+    this.selectedMotionOptionKey = this.buildUfoTrainingMotionOptionKey(
+      normalizedPath,
+      selectedMotionKey,
+    );
+    this.renderPresetOptions();
+  }
+
+  private async loadUfoTrainingMotionFromFileMap(
+    fileMap: DroppedFileMap,
+    sourcePath: string,
+    preferredMotionKey?: string,
+  ): Promise<void> {
+    const loadedRobotResult = this.lastLoadResult;
+    if (!loadedRobotResult) {
+      throw new Error('Load a URDF robot before loading UFO Training motion.');
+    }
+    const result = await this.ufoTrainingPklMotionService.loadFromDroppedFiles(
+      fileMap,
+      sourcePath,
+      preferredMotionKey,
+    );
+    this.registerUfoTrainingMotionOptions(
+      fileMap,
+      result.selectedMotionPath,
+      result.availableMotionKeys,
+      result.selectedMotionKey,
+    );
+    this.applyLoadedUrdfMotion(
+      loadedRobotResult,
+      result.clip,
+      'ufo-training',
+      result.selectedMotionPath,
+      result.warnings,
+    );
   }
 
   private registerDroppedUrdfFiles(fileMap: DroppedFileMap): void {

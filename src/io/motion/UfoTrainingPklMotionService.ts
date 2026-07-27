@@ -60,8 +60,7 @@ function selectRecord(
   const entries = Object.entries(parsed)
     .filter((entry): entry is [string, Record<string, unknown>] =>
       isUfoTrainingRecord(entry[1]),
-    )
-    .sort(([left], [right]) => left.localeCompare(right));
+    );
   if (entries.length === 0) {
     throw new Error(
       'PKL does not contain a UFO Training MotionLib record with root_trans_offset, root_rot, dof_pos, and fps.',
@@ -219,14 +218,21 @@ function buildClip(
   };
 }
 
+const parsedFileCache = new WeakMap<File, Promise<unknown>>();
+const clipFileCache = new WeakMap<File, Map<string, MotionClip>>();
+
 async function parseFile(
   file: File,
   preferredMotionKey?: string,
 ): Promise<UfoTrainingRecordSelection> {
-  return selectRecord(
-    parsePythonPickleBuffer(await file.arrayBuffer()),
-    preferredMotionKey,
-  );
+  let parsedPromise = parsedFileCache.get(file);
+  if (!parsedPromise) {
+    parsedPromise = file
+      .arrayBuffer()
+      .then((buffer) => parsePythonPickleBuffer(buffer));
+    parsedFileCache.set(file, parsedPromise);
+  }
+  return selectRecord(await parsedPromise, preferredMotionKey);
 }
 
 export class UfoTrainingPklMotionService {
@@ -282,7 +288,16 @@ export class UfoTrainingPklMotionService {
         `PKL contains ${selection.availableMotionKeys.length} motions; loaded "${selection.motionKey}".`,
       );
     }
-    const clip = buildClip(selection, selectedMotionPath);
+    let clips = clipFileCache.get(file);
+    if (!clips) {
+      clips = new Map();
+      clipFileCache.set(file, clips);
+    }
+    let clip = clips.get(selection.motionKey);
+    if (!clip) {
+      clip = buildClip(selection, selectedMotionPath);
+      clips.set(selection.motionKey, clip);
+    }
     if (!clip.name) {
       clip.name = getBaseName(selectedMotionPath) || 'motion.pkl';
     }
