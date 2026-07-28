@@ -3,11 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type { DroppedFileMap, MotionClip } from '../../types/viewer';
 import { RobotStateNpzMotionService } from './RobotStateNpzMotionService';
 import { exportGmrNpz } from './GmrNpzService';
+import { DEX_EVT_JOINT_NAMES_29 } from './RobotTrackingLayouts';
 import { UFO_POLICY_JOINT_NAMES } from './UfoReferenceNpzService';
 
 describe('GMR NPZ import and export modes', () => {
   it('exports a file that the Robot-State import mode recognizes and loads', async () => {
-    const jointNames = [...UFO_POLICY_JOINT_NAMES].reverse();
+    const jointNames = [...DEX_EVT_JOINT_NAMES_29];
     const stride = 7 + jointNames.length;
     const data = new Float32Array(2 * stride);
     data.set([1, 2, 3, 0, 0, 0, 1], 0);

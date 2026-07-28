@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { MotionClip, UrdfRobotLike } from '../../types/viewer';
 import { parseNpzFile } from './NumpyIO';
 import {
+  DEX_EVT_BODY_NAMES_39,
+  DEX_EVT_JOINT_NAMES_29,
+} from './RobotTrackingLayouts';
+import {
   buildUfoReferenceData,
   exportUfoReferenceNpz,
   UFO_POLICY_BODY_NAMES,
@@ -38,7 +42,10 @@ function createClip(frameCount = 3): MotionClip {
   };
 }
 
-function createSampler(frameCount: number): UfoFrameSampler {
+function createSampler(
+  frameCount: number,
+  bodyNames: readonly string[] = UFO_POLICY_BODY_NAMES,
+): UfoFrameSampler {
   const modelRoot = new Group();
   modelRoot.rotation.x = -Math.PI / 2;
   const robot = new Group() as any as UrdfRobotLike & {
@@ -51,7 +58,7 @@ function createSampler(frameCount: number): UfoFrameSampler {
   robot.links = {};
   modelRoot.add(robot);
 
-  UFO_POLICY_BODY_NAMES.forEach((bodyName, index) => {
+  bodyNames.forEach((bodyName, index) => {
     const body = new Group();
     body.name = bodyName;
     body.position.set(0, index * 0.01, 0);
@@ -112,6 +119,32 @@ describe('UfoReferenceNpzService', () => {
     expect((await archive.readNpy('body_pos_w.npy')).shape).toEqual([3, 30, 3]);
     expect((await archive.readNpy('body_quat_w.npy')).shape).toEqual([3, 30, 4]);
     expect((await archive.readNpy('fps.npy')).toScalarNumber()).toBe(50);
+  });
+
+  it('writes DEX EVT Tracking NPZ in Isaac 29-joint and 39-body order', async () => {
+    const clip = createClip();
+    const bytes = exportUfoReferenceNpz(
+      clip,
+      createSampler(clip.frameCount, DEX_EVT_BODY_NAMES_39),
+      { layout: 'dex-evt' },
+    );
+    const archive = await parseNpzFile(
+      new File([new Uint8Array(bytes)], 'dex-evt.npz'),
+    );
+    const jointPos = await archive.readNpy('joint_pos.npy');
+
+    expect(jointPos.shape).toEqual([3, 29]);
+    expect((await archive.readNpy('body_pos_w.npy')).shape).toEqual([
+      3,
+      39,
+      3,
+    ]);
+    const firstJoints = jointPos.toNumberArray().slice(0, 3);
+    DEX_EVT_JOINT_NAMES_29.slice(0, 3).forEach((name, index) => {
+      expect(firstJoints[index]).toBeCloseTo(
+        clip.schema.jointNames.indexOf(name) * 0.001,
+      );
+    });
   });
 
   it('rejects clips missing a policy joint', () => {

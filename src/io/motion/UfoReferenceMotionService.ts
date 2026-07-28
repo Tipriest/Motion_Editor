@@ -5,38 +5,9 @@ import {
   UFO_POLICY_BODY_NAMES,
   UFO_POLICY_JOINT_NAMES,
 } from './UfoReferenceNpzService';
+import { DEX_EVT_JOINT_NAMES_29 } from './RobotTrackingLayouts';
 
-export const DEX_EVT_JOINT_NAMES_29 = [
-  'hip_pitch_l_joint',
-  'hip_pitch_r_joint',
-  'waist_yaw_joint',
-  'hip_roll_l_joint',
-  'hip_roll_r_joint',
-  'waist_roll_joint',
-  'hip_yaw_l_joint',
-  'hip_yaw_r_joint',
-  'waist_pitch_joint',
-  'knee_pitch_l_joint',
-  'knee_pitch_r_joint',
-  'shoulder_pitch_l_joint',
-  'shoulder_pitch_r_joint',
-  'ankle_pitch_l_joint',
-  'ankle_pitch_r_joint',
-  'shoulder_roll_l_joint',
-  'shoulder_roll_r_joint',
-  'ankle_roll_l_joint',
-  'ankle_roll_r_joint',
-  'shoulder_yaw_l_joint',
-  'shoulder_yaw_r_joint',
-  'elbow_pitch_l_joint',
-  'elbow_pitch_r_joint',
-  'elbow_yaw_l_joint',
-  'elbow_yaw_r_joint',
-  'wrist_pitch_l_joint',
-  'wrist_pitch_r_joint',
-  'wrist_roll_l_joint',
-  'wrist_roll_r_joint',
-] as const;
+export { DEX_EVT_JOINT_NAMES_29 } from './RobotTrackingLayouts';
 
 const REQUIRED_KEYS = ['fps.npy', 'joint_pos.npy', 'body_pos_w.npy', 'body_quat_w.npy'] as const;
 

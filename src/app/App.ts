@@ -71,6 +71,7 @@ import {
   type MotionBrowserTreeNode,
 } from './MotionBrowserCatalog';
 import {
+  detectRobotExportTarget,
   getExportFormatOptions,
   type ExportFormatValue,
   type UrdfMotionKind,
@@ -6673,13 +6674,17 @@ export class AppController {
     formatSelect.style.color = 'var(--text-main)';
     formatSelect.style.font = 'inherit';
 
-    const isTiangong3 =
-      this.lastLoadResult?.robotName.toLowerCase().includes('tiangong3') === true ||
-      this.selectedUrdfPath?.toLowerCase().includes('/tiangong3/') === true;
+    const robotExportTarget = detectRobotExportTarget(
+      this.lastLoadResult?.robotName,
+      this.selectedUrdfPath,
+    );
     const exportMotionKind = isUrdfMotionKind(this.currentMotionKind)
       ? this.currentMotionKind
       : 'gmr';
-    for (const format of getExportFormatOptions(exportMotionKind, isTiangong3)) {
+    for (const format of getExportFormatOptions(
+      exportMotionKind,
+      robotExportTarget,
+    )) {
       const option = document.createElement('option');
       option.value = format.value;
       option.textContent = format.label;
@@ -6911,7 +6916,9 @@ export class AppController {
           exportClip,
           selectedFormat,
           Number(speedInput.value),
-          { mirrored: mirrorCheckbox.checked },
+          {
+            mirrored: mirrorCheckbox.checked,
+          },
         );
         closeDialog();
       } catch (error) {
@@ -6992,9 +6999,16 @@ export class AppController {
 
   private exportMotionClip(
     clip: MotionClip,
-    format: 'source' | 'ufo-pkl' | 'ufo-npz' | 'gmr-npz' = 'source',
+    format:
+      | 'source'
+      | 'ufo-pkl'
+      | 'ufo-npz'
+      | 'gmr-npz'
+      | 'dex-mosaic-npz' = 'source',
     playbackSpeed = 1,
-    options: { mirrored?: boolean } = {},
+    options: {
+      mirrored?: boolean;
+    } = {},
   ): void {
     let content: string | Uint8Array;
     let fileName: string;
@@ -7022,13 +7036,20 @@ export class AppController {
         options,
       );
       mimeType = 'application/zip';
-    } else if (format === 'ufo-npz') {
-      console.log('Generating UFO reference NPZ content');
-      content = exportUfoReferenceNpz(clip, this.motionPlayer);
+    } else if (format === 'ufo-npz' || format === 'dex-mosaic-npz') {
+      const isDexMosaic = format === 'dex-mosaic-npz';
+      console.log(
+        isDexMosaic
+          ? 'Generating DEX_MOSAIC 39-body NPZ content'
+          : 'Generating UFO reference 30-body NPZ content',
+      );
+      content = exportUfoReferenceNpz(clip, this.motionPlayer, {
+        layout: isDexMosaic ? 'dex-evt' : 'tiangong3',
+      });
       fileName = buildMotionExportFileName(
         clip.name,
         playbackSpeed,
-        'ufo_29dof',
+        isDexMosaic ? 'dex_mosaic' : 'ufo_29dof',
         'npz',
         options,
       );

@@ -10,11 +10,32 @@ export type ExportFormatValue =
   | 'source'
   | 'gmr-npz'
   | 'ufo-pkl'
-  | 'ufo-npz';
+  | 'ufo-npz'
+  | 'dex-mosaic-npz';
 
 export interface ExportFormatOption {
   value: ExportFormatValue;
   label: string;
+}
+
+export type RobotExportTarget = 'tiangong3' | 'dex-evt' | 'other';
+
+export function detectRobotExportTarget(
+  robotName?: string | null,
+  urdfPath?: string | null,
+): RobotExportTarget {
+  const identity = `${robotName ?? ''} ${urdfPath ?? ''}`.toLowerCase();
+  if (
+    identity.includes('dex_evt') ||
+    identity.includes('evt2') ||
+    identity.includes('tiangong2dex')
+  ) {
+    return 'dex-evt';
+  }
+  if (identity.includes('tiangong3')) {
+    return 'tiangong3';
+  }
+  return 'other';
 }
 
 function sourceFormat(kind: UrdfMotionKind): ExportFormatOption {
@@ -36,18 +57,27 @@ function sourceFormat(kind: UrdfMotionKind): ExportFormatOption {
 
 export function getExportFormatOptions(
   kind: UrdfMotionKind,
-  isTiangong3: boolean,
+  target: RobotExportTarget,
 ): ExportFormatOption[] {
   const options = [sourceFormat(kind)];
-  if (!isTiangong3) {
+  if (target === 'other') {
     return options;
   }
-  const tiangongFormats: ExportFormatOption[] = [
+  const robotFormats: ExportFormatOption[] = [
     { value: 'gmr-npz', label: 'GMR NPZ (root + 29-DOF)' },
-    { value: 'ufo-pkl', label: 'UFO Training PKL (MotionLib)' },
     { value: 'ufo-npz', label: 'UFO Tracking NPZ (Reference)' },
   ];
-  for (const option of tiangongFormats) {
+  if (target === 'tiangong3') {
+    robotFormats.splice(1, 0, {
+      value: 'ufo-pkl',
+      label: 'UFO Training PKL (MotionLib)',
+    });
+    robotFormats.push({
+      value: 'dex-mosaic-npz',
+      label: 'DEX_MOSAIC NPZ (39-body)',
+    });
+  }
+  for (const option of robotFormats) {
     if (!options.some(({ value }) => value === option.value)) {
       options.push(option);
     }

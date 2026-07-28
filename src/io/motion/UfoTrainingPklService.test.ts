@@ -27,6 +27,8 @@ function createReferenceData(): UfoReferenceData {
   bodyPosW.set([1, 2, 3], 0);
   bodyPosW.set([4, 5, 6], bodyCount * 3);
   return {
+    jointCount,
+    bodyCount,
     fps: new Float32Array([50]),
     jointPos,
     jointVel: new Float32Array(frameCount * jointCount),

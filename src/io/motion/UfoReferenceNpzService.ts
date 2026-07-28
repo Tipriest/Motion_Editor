@@ -1,6 +1,11 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import type { MotionClip, UrdfRobotLike } from '../../types/viewer';
 import { writeFloat32Npz } from './NpzWriter';
+import {
+  DEX_EVT_BODY_NAMES_39,
+  DEX_EVT_JOINT_NAMES_29,
+  type RobotTrackingLayoutId,
+} from './RobotTrackingLayouts';
 
 export const UFO_POLICY_JOINT_NAMES = [
   'hip_pitch_l_joint',
@@ -75,6 +80,8 @@ export interface UfoFrameSampler {
 }
 
 export interface UfoReferenceData {
+  jointCount: number;
+  bodyCount: number;
   fps: Float32Array;
   jointPos: Float32Array;
   jointVel: Float32Array;
@@ -82,6 +89,10 @@ export interface UfoReferenceData {
   bodyQuatW: Float32Array;
   bodyLinVelW: Float32Array;
   bodyAngVelW: Float32Array;
+}
+
+export interface UfoReferenceExportOptions {
+  layout?: RobotTrackingLayoutId;
 }
 
 interface TransformNode {
@@ -169,12 +180,21 @@ function calculateAngularVelocities(
   return output;
 }
 
-export function buildUfoReferenceData(clip: MotionClip, sampler: UfoFrameSampler): UfoReferenceData {
+export function buildUfoReferenceData(
+  clip: MotionClip,
+  sampler: UfoFrameSampler,
+  options: UfoReferenceExportOptions = {},
+): UfoReferenceData {
   if (!Number.isFinite(clip.fps) || clip.fps <= 0 || clip.frameCount <= 0) {
     throw new Error('UFO NPZ export requires a non-empty clip with positive FPS.');
   }
 
-  const jointIndices = UFO_POLICY_JOINT_NAMES.map((jointName) => {
+  const layout = options.layout ?? 'tiangong3';
+  const jointNames =
+    layout === 'dex-evt' ? DEX_EVT_JOINT_NAMES_29 : UFO_POLICY_JOINT_NAMES;
+  const bodyNames =
+    layout === 'dex-evt' ? DEX_EVT_BODY_NAMES_39 : UFO_POLICY_BODY_NAMES;
+  const jointIndices = jointNames.map((jointName) => {
     const index = clip.schema.jointNames.indexOf(jointName);
     if (index < 0) {
       throw new Error(`UFO NPZ export requires joint "${jointName}".`);
@@ -182,8 +202,8 @@ export function buildUfoReferenceData(clip: MotionClip, sampler: UfoFrameSampler
     return index;
   });
   const frameCount = clip.frameCount;
-  const jointCount = UFO_POLICY_JOINT_NAMES.length;
-  const bodyCount = UFO_POLICY_BODY_NAMES.length;
+  const jointCount = jointNames.length;
+  const bodyCount = bodyNames.length;
   const jointPos = new Float32Array(frameCount * jointCount);
   const bodyPosW = new Float32Array(frameCount * bodyCount * 3);
   const bodyQuatXyzw = new Float32Array(frameCount * bodyCount * 4);
@@ -208,7 +228,7 @@ export function buildUfoReferenceData(clip: MotionClip, sampler: UfoFrameSampler
     inverseModelRoot.copy(modelRoot.matrixWorld).invert();
 
     for (let bodyIndex = 0; bodyIndex < bodyCount; bodyIndex += 1) {
-      const bodyName = UFO_POLICY_BODY_NAMES[bodyIndex];
+      const bodyName = bodyNames[bodyIndex];
       const body = robot.links?.[bodyName] as TransformNode | undefined;
       if (!body?.matrixWorld) {
         throw new Error(`UFO NPZ export requires body "${bodyName}".`);
@@ -265,6 +285,8 @@ export function buildUfoReferenceData(clip: MotionClip, sampler: UfoFrameSampler
   }
 
   return {
+    jointCount,
+    bodyCount,
     fps: new Float32Array([clip.fps]),
     jointPos,
     jointVel,
@@ -276,8 +298,7 @@ export function buildUfoReferenceData(clip: MotionClip, sampler: UfoFrameSampler
 }
 
 export function encodeUfoReferenceNpz(data: UfoReferenceData, frameCount: number): Uint8Array {
-  const jointCount = UFO_POLICY_JOINT_NAMES.length;
-  const bodyCount = UFO_POLICY_BODY_NAMES.length;
+  const { jointCount, bodyCount } = data;
   return writeFloat32Npz({
     fps: { data: data.fps, shape: [] },
     joint_pos: { data: data.jointPos, shape: [frameCount, jointCount] },
@@ -289,6 +310,13 @@ export function encodeUfoReferenceNpz(data: UfoReferenceData, frameCount: number
   });
 }
 
-export function exportUfoReferenceNpz(clip: MotionClip, sampler: UfoFrameSampler): Uint8Array {
-  return encodeUfoReferenceNpz(buildUfoReferenceData(clip, sampler), clip.frameCount);
+export function exportUfoReferenceNpz(
+  clip: MotionClip,
+  sampler: UfoFrameSampler,
+  options: UfoReferenceExportOptions = {},
+): Uint8Array {
+  return encodeUfoReferenceNpz(
+    buildUfoReferenceData(clip, sampler, options),
+    clip.frameCount,
+  );
 }
