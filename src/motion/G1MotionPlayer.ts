@@ -54,6 +54,7 @@ export class G1MotionPlayer {
   public onPlaybackStateChanged: ((isPlaying: boolean) => void) | null = null;
   public onWarning: ((warning: string) => void) | null = null;
   public onJointAnglesChanged: ((jointNames: string[], jointValues: number[]) => void) | null = null;
+  public onClipChanged: (() => void) | null = null;
 
   private readonly now: () => number;
   private readonly requestFrame: RequestFrameFn;
@@ -271,6 +272,7 @@ export class G1MotionPlayer {
 
     // 更新当前帧以反映更改
     this.applyFrame(this.currentFrame);
+    this.onClipChanged?.();
   }
 
   setRootRotation(x: number, y: number, z: number, w: number): void {
@@ -287,6 +289,7 @@ export class G1MotionPlayer {
 
     // 更新当前帧以反映更改
     this.applyFrame(this.currentFrame);
+    this.onClipChanged?.();
   }
 
   setJointValue(jointName: string, value: number): void {
@@ -308,6 +311,7 @@ export class G1MotionPlayer {
     if (setter) {
       setter(value);
     }
+    this.onClipChanged?.();
 
     this.onJointAnglesChanged?.(this.getJointNames(), this.getCurrentJointValues());
   }
@@ -376,6 +380,86 @@ export class G1MotionPlayer {
       }
       if (wasPlaying) {
         this.play();
+      }
+    }
+  }
+
+  async sampleClipFramesAsync(
+    clip: MotionClip,
+    visitor: (frameIndex: number, robot: UrdfRobotLike) => void,
+    options: {
+      frameStep?: number;
+      yieldEvery?: number;
+      onProgress?: (completed: number, total: number) => void;
+    } = {},
+  ): Promise<void> {
+    if (!this.robot) {
+      throw new Error('A URDF robot must be attached before sampling motion frames.');
+    }
+
+    const originalClip = this.clip;
+    const originalFrame = this.currentFrame;
+    const wasPlaying = this.isPlaying;
+    this.pause();
+    const frameChanged = this.onFrameChanged;
+    const jointAnglesChanged = this.onJointAnglesChanged;
+    const warning = this.onWarning;
+    this.onFrameChanged = null;
+    this.onJointAnglesChanged = null;
+    this.onWarning = null;
+
+    try {
+      const binding = this.loadClip(clip);
+      if (binding.missingRequiredJoints.length > 0) {
+        throw new Error(
+          `Cannot sample motion because robot joints are missing: ${binding.missingRequiredJoints.join(', ')}.`,
+        );
+      }
+      const frameStep = Math.max(1, Math.floor(options.frameStep ?? 1));
+      const yieldEvery = Math.max(1, Math.floor(options.yieldEvery ?? 12));
+      const frameIndices: number[] = [];
+      for (
+        let frameIndex = 0;
+        frameIndex < clip.frameCount;
+        frameIndex += frameStep
+      ) {
+        frameIndices.push(frameIndex);
+      }
+      const finalFrame = clip.frameCount - 1;
+      if (
+        finalFrame >= 0 &&
+        frameIndices[frameIndices.length - 1] !== finalFrame
+      ) {
+        frameIndices.push(finalFrame);
+      }
+      options.onProgress?.(0, frameIndices.length);
+      for (let index = 0; index < frameIndices.length; index += 1) {
+        const frameIndex = frameIndices[index];
+        this.seek(frameIndex);
+        this.robot.updateMatrixWorld?.(true);
+        visitor(frameIndex, this.robot);
+        options.onProgress?.(index + 1, frameIndices.length);
+        if ((index + 1) % yieldEvery === 0 && index + 1 < frameIndices.length) {
+          await new Promise<void>((resolve) =>
+            this.requestFrame(() => resolve()),
+          );
+        }
+      }
+    } finally {
+      if (this.clip === clip) {
+        this.loadClip(originalClip);
+        if (originalClip) {
+          this.seek(originalFrame);
+        }
+      }
+      this.onFrameChanged = frameChanged;
+      this.onJointAnglesChanged = jointAnglesChanged;
+      this.onWarning = warning;
+      if (this.clip === originalClip && originalClip) {
+        this.seek(originalFrame);
+        if (wasPlaying) {
+          this.play();
+        }
       }
     }
   }

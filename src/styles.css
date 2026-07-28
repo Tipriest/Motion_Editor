@@ -1105,6 +1105,32 @@ body {
   color: #ff8b7c;
 }
 
+.motion-timeline__collision-summary {
+  color: #d8b4fe;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.motion-timeline__collision-summary[data-has-penetrations='true'] {
+  color: #ff70a6;
+}
+
+.motion-timeline__analysis-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 9rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.motion-timeline__analysis-progress progress {
+  width: 7rem;
+  height: 0.45rem;
+  accent-color: #b881ff;
+}
+
 .motion-timeline__limit-markers {
   position: absolute;
   z-index: 2;
@@ -1113,6 +1139,47 @@ body {
   left: 7px;
   height: 10px;
   pointer-events: none;
+}
+
+.motion-timeline__collision-markers {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  right: 7px;
+  left: 7px;
+  height: 10px;
+  pointer-events: none;
+}
+
+.motion-timeline__collision-marker {
+  position: absolute;
+  top: 0;
+  width: 5px;
+  height: 8px;
+  border: 0;
+  border-radius: 50% 50% 2px 2px;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  box-shadow: 0 0 5px currentColor;
+}
+
+.motion-timeline__collision-marker--penetration {
+  color: #ff3d91;
+  background: #ff3d91;
+}
+
+.motion-timeline__collision-marker--near {
+  color: #b881ff;
+  background: #b881ff;
+}
+
+.motion-timeline__collision-marker:hover,
+.motion-timeline__collision-marker:focus-visible {
+  height: 12px;
+  outline: 1px solid #ffffff;
+  outline-offset: 1px;
 }
 
 .motion-timeline__limit-marker {

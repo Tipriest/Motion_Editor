@@ -277,6 +277,38 @@ describe('G1MotionPlayer', () => {
     expect(frameEvents).toEqual([1]);
   });
 
+  it('samples frames asynchronously and reports progress without losing state', async () => {
+    const { robot } = createMockRobot();
+    const originalClip = createClip(2);
+    const sampledClip = createClip(4);
+    const player = new G1MotionPlayer({
+      requestAnimationFrame: (callback: RafCallback) => {
+        callback(0);
+        return 1;
+      },
+      cancelAnimationFrame: () => {},
+    });
+    player.attachRobot(robot);
+    player.loadClip(originalClip);
+    player.seek(1);
+    const visitedFrames: number[] = [];
+    const progress: Array<[number, number]> = [];
+
+    await player.sampleClipFramesAsync(
+      sampledClip,
+      (frameIndex) => visitedFrames.push(frameIndex),
+      {
+        yieldEvery: 1,
+        onProgress: (completed, total) => progress.push([completed, total]),
+      },
+    );
+
+    expect(visitedFrames).toEqual([0, 1, 2, 3]);
+    expect(progress[progress.length - 1]).toEqual([4, 4]);
+    expect(player.getClip()).toBe(originalClip);
+    expect(player.getCurrentFrame()).toBe(1);
+  });
+
   it('stops at the last frame and emits playback state transitions', () => {
     let nowMs = 0;
     let nextRafId = 1;

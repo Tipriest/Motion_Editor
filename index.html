@@ -341,6 +341,11 @@
             >Frame 0 / 0</span
           >
           <span id="joint-limit-summary" class="motion-timeline__limit-summary" hidden></span>
+          <span id="collision-summary" class="motion-timeline__collision-summary" hidden></span>
+          <div id="collision-analysis-progress" class="motion-timeline__analysis-progress" hidden>
+            <progress id="collision-analysis-progress-bar" max="1" value="0"></progress>
+            <span id="collision-analysis-progress-label">0%</span>
+          </div>
         </div>
         <div class="motion-timeline__transport" aria-label="Playback controls">
           <button id="motion-reset-btn" type="button" class="toggle-chip">
@@ -362,6 +367,12 @@
           <button id="insert-keyframe-btn" type="button" class="toggle-chip">
             Insert Keyframe
           </button>
+          <button id="analyze-collisions-btn" type="button" class="toggle-chip" disabled>
+            Analyze Collisions
+          </button>
+          <button id="repair-collisions-btn" type="button" class="toggle-chip" disabled>
+            Repair Collisions
+          </button>
         </div>
       </div>
       <div class="motion-timeline__track-row">
@@ -378,6 +389,11 @@
             id="joint-limit-markers"
             class="motion-timeline__limit-markers"
             aria-label="Joint limit warnings"
+          ></div>
+          <div
+            id="collision-markers"
+            class="motion-timeline__collision-markers"
+            aria-label="Collision warnings"
           ></div>
           <div id="keyframe-markers" class="motion-timeline__markers"></div>
           <input

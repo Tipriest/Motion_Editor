@@ -43,6 +43,11 @@ import {
   type CenterOfMassPoint,
 } from '../motion/CenterOfMassService';
 import {
+  CollisionAnalysisService,
+  type CollisionAnalysisResult,
+  type CollisionHit,
+} from '../motion/CollisionAnalysisService';
+import {
   FootGroundAlignmentService,
   type FootSide,
 } from '../motion/FootGroundAlignmentService';
@@ -963,6 +968,7 @@ export class AppController {
   private readonly footGroundAlignmentService: FootGroundAlignmentService;
   private readonly footLockService: FootLockService;
   private readonly jointLimitAnalysisService: JointLimitAnalysisService;
+  private readonly collisionAnalysisService: CollisionAnalysisService;
   private readonly bvhMotionPlayer: BvhMotionPlayer;
   private readonly smplMotionPlayer: SmplMotionPlayer;
   private readonly dropHint: HTMLParagraphElement;
@@ -1005,6 +1011,12 @@ export class AppController {
   private readonly motionTitle: HTMLParagraphElement;
   private readonly motionFrameLabel: HTMLSpanElement;
   private readonly jointLimitSummary: HTMLSpanElement;
+  private readonly collisionSummary: HTMLSpanElement;
+  private readonly analyzeCollisionsButton: HTMLButtonElement;
+  private readonly repairCollisionsButton: HTMLButtonElement;
+  private readonly collisionAnalysisProgress: HTMLDivElement;
+  private readonly collisionAnalysisProgressBar: HTMLProgressElement;
+  private readonly collisionAnalysisProgressLabel: HTMLSpanElement;
   private readonly folderInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
   private readonly pickFolderButton: HTMLButtonElement;
@@ -1139,8 +1151,13 @@ export class AppController {
   private keyframes: Set<number> = new Set();
   private keyframeMarkersContainer: HTMLElement | null = null;
   private readonly jointLimitMarkersContainer: HTMLElement;
+  private readonly collisionMarkersContainer: HTMLElement;
   private jointLimitAnalysis: JointLimitAnalysisResult | null = null;
   private jointLimitAnalysisTimer: number | null = null;
+  private collisionAnalysis: CollisionAnalysisResult | null = null;
+  private isAnalyzingCollisions = false;
+  private isRepairingCollisions = false;
+  private collisionAnalysisGeneration = 0;
 
   private readonly onWindowResize = (): void => {
     this.sceneController.resize();
@@ -1642,6 +1659,14 @@ export class AppController {
     void this.applyCenterOfMassAdjustment();
   };
 
+  private readonly onRepairCollisionsClick = (): void => {
+    void this.repairDetectedCollisions();
+  };
+
+  private readonly onAnalyzeCollisionsClick = (): void => {
+    void this.analyzeCollisions();
+  };
+
   private captureFootSolePose(
     sole: FootSoleDefinition,
     robot: LoadedRobotResult['robot'],
@@ -2005,8 +2030,22 @@ export class AppController {
     this.motionFrameLabel = requireElement<HTMLSpanElement>('motion-frame-label');
     this.jointLimitSummary =
       requireElement<HTMLSpanElement>('joint-limit-summary');
+    this.collisionSummary =
+      requireElement<HTMLSpanElement>('collision-summary');
+    this.analyzeCollisionsButton =
+      requireElement<HTMLButtonElement>('analyze-collisions-btn');
+    this.repairCollisionsButton =
+      requireElement<HTMLButtonElement>('repair-collisions-btn');
+    this.collisionAnalysisProgress =
+      requireElement<HTMLDivElement>('collision-analysis-progress');
+    this.collisionAnalysisProgressBar =
+      requireElement<HTMLProgressElement>('collision-analysis-progress-bar');
+    this.collisionAnalysisProgressLabel =
+      requireElement<HTMLSpanElement>('collision-analysis-progress-label');
     this.jointLimitMarkersContainer =
       requireElement<HTMLElement>('joint-limit-markers');
+    this.collisionMarkersContainer =
+      requireElement<HTMLElement>('collision-markers');
     this.folderInput = requireElement<HTMLInputElement>('folder-input');
     this.fileInput = requireElement<HTMLInputElement>('file-input');
     this.pickFolderButton = requireElement<HTMLButtonElement>('pick-folder-btn');
@@ -2067,6 +2106,7 @@ export class AppController {
     this.footGroundAlignmentService = new FootGroundAlignmentService();
     this.footLockService = new FootLockService();
     this.jointLimitAnalysisService = new JointLimitAnalysisService();
+    this.collisionAnalysisService = new CollisionAnalysisService();
     this.bvhMotionPlayer = new BvhMotionPlayer();
     this.smplMotionPlayer = new SmplMotionPlayer();
     this.motionPlayer.onFrameChanged = (snapshot) => {
@@ -2075,6 +2115,15 @@ export class AppController {
       this.updateCenterOfMassVisualization();
       this.updateGroundContactVisualization();
       this.sceneController.syncViewToCurrentRobot();
+    };
+    this.motionPlayer.onClipChanged = () => {
+      if (
+        !this.isRepairingCollisions &&
+        !this.isAnalyzingCollisions &&
+        this.collisionAnalysis !== null
+      ) {
+        this.invalidateCollisionAnalysis();
+      }
     };
     this.motionPlayer.onPlaybackStateChanged = (isPlaying) => {
       this.isMotionPlaying = isPlaying;
@@ -2178,6 +2227,14 @@ export class AppController {
     this.prevFrameButton.addEventListener('click', this.onPrevFrameClick);
     this.nextFrameButton.addEventListener('click', this.onNextFrameClick);
     this.insertKeyframeButton.addEventListener('click', this.onInsertKeyframeClick);
+    this.analyzeCollisionsButton.addEventListener(
+      'click',
+      this.onAnalyzeCollisionsClick,
+    );
+    this.repairCollisionsButton.addEventListener(
+      'click',
+      this.onRepairCollisionsClick,
+    );
     this.prevKeyframeButton.addEventListener('click', this.onPrevKeyframeClick);
     this.nextKeyframeButton.addEventListener('click', this.onNextKeyframeClick);
     this.motionFrameCountInput.addEventListener('change', this.onMotionFrameCountChange);
@@ -2228,6 +2285,7 @@ export class AppController {
     this.sceneController.clearRobot();
     this.sceneController.resetView();
     this.motionPlayer.attachRobot(null);
+    this.collisionAnalysisService.attachRobot(null);
     this.clearMotionPlayback();
     this.clearCurrentObjState();
     this.renderUrdfList();
@@ -2271,6 +2329,14 @@ export class AppController {
     this.motionFpsInput.removeEventListener('input', this.onMotionFpsInput);
     this.motionFpsInput.removeEventListener('change', this.onMotionFpsChange);
     this.motionFrameSlider.removeEventListener('input', this.onMotionFrameInput);
+    this.analyzeCollisionsButton.removeEventListener(
+      'click',
+      this.onAnalyzeCollisionsClick,
+    );
+    this.repairCollisionsButton.removeEventListener(
+      'click',
+      this.onRepairCollisionsClick,
+    );
 
     this.urdfLoadService.dispose();
     this.motionPlayer.dispose();
@@ -2587,6 +2653,7 @@ export class AppController {
       this.sceneController.setRobot(result.robot);
       this.sceneController.setGeometryVisibility(this.showVisual, this.showCollision);
       this.motionPlayer.attachRobot(result.robot);
+      this.collisionAnalysisService.attachRobot(result.robot);
       this.centerOfMassService.attachRobot(result.robot);
       this.groundContactService.attachRobot(result.robot);
       this.centerOfMassTrail = [];
@@ -3968,6 +4035,7 @@ export class AppController {
     this.motionPlayer.attachRobot(null);
     this.centerOfMassService.attachRobot(null);
     this.groundContactService.attachRobot(null);
+    this.collisionAnalysisService.attachRobot(null);
     this.centerOfMassTrail = [];
     this.sceneController.clearCenterOfMass();
     this.groundContactCount = 0;
@@ -3983,6 +4051,11 @@ export class AppController {
       this.jointLimitAnalysisTimer = null;
     }
     this.renderJointLimitMarkers();
+    this.collisionAnalysis = null;
+    this.collisionAnalysisGeneration += 1;
+    this.isAnalyzingCollisions = false;
+    this.collisionAnalysisProgress.hidden = true;
+    this.renderCollisionMarkers();
     this.currentBvhMotion = null;
     this.currentBvhFileMap = null;
     this.currentSmplModel = null;
@@ -5679,6 +5752,9 @@ export class AppController {
       );
     }
     this.renderJointLimitMarkers();
+    if (!this.isRepairingCollisions && !this.isAnalyzingCollisions) {
+      this.invalidateCollisionAnalysis();
+    }
   }
 
   private formatJointLimitNumber(hit: JointLimitHit, value: number): string {
@@ -5781,6 +5857,388 @@ export class AppController {
         this.scrollToJointControl(primaryHit.jointName, primaryHit.status);
       });
       this.jointLimitMarkersContainer.appendChild(marker);
+    }
+  }
+
+  private invalidateCollisionAnalysis(): void {
+    this.collisionAnalysisGeneration += 1;
+    this.collisionAnalysis = null;
+    this.renderCollisionMarkers();
+  }
+
+  private async analyzeCollisions(): Promise<void> {
+    const clip = this.currentMotionClip;
+    if (
+      !clip ||
+      !this.lastLoadResult ||
+      !isUrdfMotionKind(this.currentMotionKind) ||
+      this.collisionAnalysisService.getColliderCount() === 0 ||
+      this.isAnalyzingCollisions
+    ) {
+      return;
+    }
+    const generation = ++this.collisionAnalysisGeneration;
+    this.isAnalyzingCollisions = true;
+    this.analyzeCollisionsButton.disabled = true;
+    this.analyzeCollisionsButton.textContent = 'Analyzing…';
+    this.repairCollisionsButton.disabled = true;
+    this.collisionAnalysisProgress.hidden = false;
+    this.collisionAnalysisProgressBar.value = 0;
+    this.collisionAnalysisProgressLabel.textContent = '0%';
+    this.collisionSummary.hidden = false;
+    this.collisionSummary.textContent = 'Collisions: analyzing…';
+    const byFrame = new Map<number, CollisionHit[]>();
+    try {
+      await this.motionPlayer.sampleClipFramesAsync(
+        clip,
+        (frameIndex) => {
+          if (generation !== this.collisionAnalysisGeneration) {
+            throw new Error('Collision analysis was cancelled.');
+          }
+          const hits = this.collisionAnalysisService.analyzeCurrentFrame(
+            frameIndex,
+            this.sceneController.getGroundHeight(),
+          );
+          if (hits.length > 0) {
+            byFrame.set(frameIndex, hits);
+          }
+        },
+        {
+          yieldEvery: 8,
+          onProgress: (completed, total) => {
+            const progress = total > 0 ? completed / total : 1;
+            this.collisionAnalysisProgressBar.value = progress;
+            this.collisionAnalysisProgressLabel.textContent =
+              `${Math.round(progress * 100)}% · ${completed}/${total}`;
+          },
+        },
+      );
+      if (generation === this.collisionAnalysisGeneration) {
+        this.collisionAnalysis = CollisionAnalysisService.summarize(byFrame);
+      }
+    } catch (error) {
+      if (generation === this.collisionAnalysisGeneration) {
+        console.warn('Collision analysis failed:', error);
+        this.collisionAnalysis = null;
+      }
+    } finally {
+      if (generation === this.collisionAnalysisGeneration) {
+        this.isAnalyzingCollisions = false;
+        this.analyzeCollisionsButton.textContent = 'Analyze Collisions';
+        this.collisionAnalysisProgress.hidden = true;
+        this.renderCollisionMarkers();
+      }
+    }
+  }
+
+  private formatCollisionTooltip(
+    frameIndex: number,
+    hits: readonly CollisionHit[],
+  ): string {
+    const penetrations = hits.filter(
+      ({ severity }) => severity === 'penetration',
+    ).length;
+    const lines = [
+      `Frame ${frameIndex + 1} · ${penetrations > 0 ? `${penetrations} penetration${penetrations > 1 ? 's' : ''}` : `${hits.length} near collision`}`,
+    ];
+    for (const hit of hits.slice(0, 8)) {
+      const depth = `${(hit.depth * 1_000).toFixed(1)} mm`;
+      lines.push(
+        hit.kind === 'ground'
+          ? `${hit.linkA} ↔ ground: ${depth}`
+          : `${hit.linkA} ↔ ${hit.linkB}: ${depth}`,
+      );
+    }
+    if (hits.length > 8) {
+      lines.push(`…and ${hits.length - 8} more`);
+    }
+    lines.push('Click to seek to this frame.');
+    return lines.join('\n');
+  }
+
+  private renderCollisionMarkers(): void {
+    this.collisionMarkersContainer.innerHTML = '';
+    const analysis = this.collisionAnalysis;
+    const frameCount = this.currentMotionClip?.frameCount ?? 0;
+    if (!analysis || frameCount <= 0) {
+      const canAnalyze =
+        frameCount > 0 &&
+        Boolean(this.lastLoadResult) &&
+        isUrdfMotionKind(this.currentMotionKind) &&
+        this.collisionAnalysisService.getColliderCount() > 0;
+      this.collisionSummary.hidden = !canAnalyze;
+      this.collisionSummary.textContent = canAnalyze
+        ? 'Collisions: not analyzed'
+        : '';
+      this.analyzeCollisionsButton.disabled =
+        !canAnalyze || this.isAnalyzingCollisions || this.isRepairingCollisions;
+      this.repairCollisionsButton.disabled = true;
+      return;
+    }
+    this.analyzeCollisionsButton.disabled =
+      this.isAnalyzingCollisions || this.isRepairingCollisions;
+    this.collisionSummary.hidden =
+      analysis.penetrationFrameCount === 0 && analysis.nearFrameCount === 0;
+    this.collisionSummary.dataset.hasPenetrations =
+      analysis.penetrationFrameCount > 0 ? 'true' : 'false';
+    this.collisionSummary.textContent =
+      `Collisions: ${analysis.penetrationFrameCount} red · ${analysis.nearFrameCount} purple`;
+    this.repairCollisionsButton.disabled =
+      this.isRepairingCollisions || analysis.penetrationFrameCount === 0;
+
+    const maxFrame = Math.max(frameCount - 1, 1);
+    const entries = [...analysis.byFrame.entries()];
+    const maxMarkers = 800;
+    const step = Math.max(1, Math.ceil(entries.length / maxMarkers));
+    for (let index = 0; index < entries.length; index += step) {
+      const [frameIndex, hits] = entries[index];
+      const hasPenetration = hits.some(
+        ({ severity }) => severity === 'penetration',
+      );
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className =
+        `motion-timeline__collision-marker motion-timeline__collision-marker--${hasPenetration ? 'penetration' : 'near'}`;
+      marker.style.left = `${(frameIndex / maxFrame) * 100}%`;
+      marker.title = this.formatCollisionTooltip(frameIndex, hits);
+      marker.setAttribute(
+        'aria-label',
+        `Frame ${frameIndex + 1}: ${hasPenetration ? 'geometry penetration' : 'near collision'}`,
+      );
+      marker.addEventListener('click', () => {
+        this.motionPlayer.seek(frameIndex);
+      });
+      this.collisionMarkersContainer.appendChild(marker);
+    }
+  }
+
+  private collisionScoreAtFrame(frameIndex: number): number {
+    this.motionPlayer.seek(frameIndex);
+    return this.collisionAnalysisService
+      .analyzeCurrentFrame(frameIndex, this.sceneController.getGroundHeight())
+      .filter(
+        ({ kind, severity }) =>
+          kind === 'self' && severity === 'penetration',
+      )
+      .reduce((sum, hit) => sum + hit.depth, 0);
+  }
+
+  private clampJointValue(jointName: string, value: number): number {
+    const joint = (this.lastLoadResult?.robot.joints as any)?.[jointName];
+    const lower = Number(joint?.limit?.lower);
+    const upper = Number(joint?.limit?.upper);
+    return Math.min(
+      Number.isFinite(upper) ? upper : Number.POSITIVE_INFINITY,
+      Math.max(
+        Number.isFinite(lower) ? lower : Number.NEGATIVE_INFINITY,
+        value,
+      ),
+    );
+  }
+
+  private async repairDetectedCollisions(): Promise<void> {
+    const clip = this.currentMotionClip;
+    const analysis = this.collisionAnalysis;
+    if (
+      !clip ||
+      !analysis ||
+      !this.lastLoadResult ||
+      this.isRepairingCollisions
+    ) {
+      return;
+    }
+    const penetrationEntries = [...analysis.byFrame.entries()].filter(
+      ([, hits]) =>
+        hits.some(({ severity }) => severity === 'penetration'),
+    );
+    if (penetrationEntries.length === 0) {
+      return;
+    }
+
+    this.motionPlayer.pause();
+    const originalData = clip.data.slice();
+    const originalFrame = this.motionPlayer.getCurrentFrame();
+    const originalPenetrationFrames = analysis.penetrationFrameCount;
+    this.isRepairingCollisions = true;
+    this.repairCollisionsButton.disabled = true;
+    this.repairCollisionsButton.textContent = 'Repairing…';
+    try {
+      const rootLift = new Float32Array(clip.frameCount);
+      for (const [frameIndex, hits] of penetrationEntries) {
+        const groundDepth = hits
+          .filter(
+            ({ kind, severity }) =>
+              kind === 'ground' && severity === 'penetration',
+          )
+          .reduce((maximum, hit) => Math.max(maximum, hit.depth), 0);
+        if (groundDepth > 0) {
+          rootLift[frameIndex] = groundDepth + 0.002;
+        }
+      }
+      const smoothedRootLift = new Float32Array(clip.frameCount);
+      for (let frame = 0; frame < rootLift.length; frame += 1) {
+        if (rootLift[frame] <= 0) {
+          continue;
+        }
+        const radius = 5;
+        for (let offset = -radius; offset <= radius; offset += 1) {
+          const target = frame + offset;
+          if (target < 0 || target >= clip.frameCount) {
+            continue;
+          }
+          const weight = 0.5 + 0.5 * Math.cos((Math.PI * offset) / (radius + 1));
+          smoothedRootLift[target] = Math.max(
+            smoothedRootLift[target],
+            rootLift[frame] * weight,
+          );
+        }
+      }
+      for (let frame = 0; frame < clip.frameCount; frame += 1) {
+        clip.data[frame * clip.stride + 2] += smoothedRootLift[frame];
+      }
+
+      const selfEntries = penetrationEntries.filter(([, hits]) =>
+        hits.some(
+          ({ kind, severity }) =>
+            kind === 'self' && severity === 'penetration',
+        ),
+      );
+      const frameStep = Math.max(1, Math.ceil(selfEntries.length / 120));
+      const edits: Array<{
+        frameIndex: number;
+        jointIndex: number;
+        delta: number;
+      }> = [];
+      for (
+        let entryIndex = 0;
+        entryIndex < selfEntries.length;
+        entryIndex += frameStep
+      ) {
+        const [frameIndex, initialHits] = selfEntries[entryIndex];
+        const involvedLinks = initialHits
+          .filter(
+            ({ kind, severity }) =>
+              kind === 'self' && severity === 'penetration',
+          )
+          .flatMap(({ linkA, linkB }) => (linkB ? [linkA, linkB] : [linkA]));
+        const chainJoints =
+          this.collisionAnalysisService.getInfluencingJointNames(involvedLinks);
+        const directJoints = involvedLinks
+          .map((linkName) => linkName.replace(/_link$/, '_joint'))
+          .filter((jointName) => clip.schema.jointNames.includes(jointName));
+        const candidateJoints = [...new Set([...directJoints, ...chainJoints])]
+          .filter((jointName) => clip.schema.jointNames.includes(jointName))
+          .slice(-12);
+        if (candidateJoints.length === 0) {
+          continue;
+        }
+
+        let bestScore = this.collisionScoreAtFrame(frameIndex);
+        const frameBase =
+          frameIndex * clip.stride + clip.schema.rootComponentCount;
+        for (const step of [0.08, 0.04, 0.02]) {
+          for (const jointName of candidateJoints) {
+            const jointIndex = clip.schema.jointNames.indexOf(jointName);
+            const dataIndex = frameBase + jointIndex;
+            const originalValue = clip.data[dataIndex];
+            let selectedValue = originalValue;
+            for (const direction of [-1, 1]) {
+              clip.data[dataIndex] = this.clampJointValue(
+                jointName,
+                originalValue + direction * step,
+              );
+              const score = this.collisionScoreAtFrame(frameIndex);
+              if (score + 1e-5 < bestScore) {
+                bestScore = score;
+                selectedValue = clip.data[dataIndex];
+              }
+            }
+            clip.data[dataIndex] = selectedValue;
+            this.motionPlayer.seek(frameIndex);
+          }
+          if (bestScore <= 0.001) {
+            break;
+          }
+        }
+        for (const jointName of candidateJoints) {
+          const jointIndex = clip.schema.jointNames.indexOf(jointName);
+          const dataIndex = frameBase + jointIndex;
+          const delta = clip.data[dataIndex] - originalData[dataIndex];
+          if (Math.abs(delta) > 1e-6) {
+            edits.push({ frameIndex, jointIndex, delta });
+          }
+        }
+        if (entryIndex % Math.max(frameStep * 8, 1) === 0) {
+          this.repairCollisionsButton.textContent =
+            `Repairing ${Math.min(entryIndex + 1, selfEntries.length)}/${selfEntries.length}`;
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      }
+
+      const smoothingRadius = 5;
+      for (const { frameIndex, jointIndex, delta } of edits) {
+        for (
+          let offset = -smoothingRadius;
+          offset <= smoothingRadius;
+          offset += 1
+        ) {
+          if (offset === 0) {
+            continue;
+          }
+          const targetFrame = frameIndex + offset;
+          if (targetFrame < 0 || targetFrame >= clip.frameCount) {
+            continue;
+          }
+          const weight =
+            0.5 +
+            0.5 *
+              Math.cos((Math.PI * offset) / (smoothingRadius + 1));
+          const targetIndex =
+            targetFrame * clip.stride +
+            clip.schema.rootComponentCount +
+            jointIndex;
+          clip.data[targetIndex] += delta * weight;
+        }
+      }
+
+      this.motionPlayer.seek(originalFrame);
+      this.rebuildJointLimitAnalysis();
+      await this.analyzeCollisions();
+      let remaining = this.collisionAnalysis?.penetrationFrameCount ?? 0;
+      if (remaining >= originalPenetrationFrames) {
+        clip.data.set(originalData);
+        this.motionPlayer.seek(originalFrame);
+        this.rebuildJointLimitAnalysis();
+        await this.analyzeCollisions();
+        remaining = this.collisionAnalysis?.penetrationFrameCount ?? 0;
+      }
+      this.motionWarnings = this.motionWarnings.filter(
+        (warning) => !warning.startsWith('Collision repair:'),
+      );
+      this.motionWarnings.push(
+        `Collision repair: ${originalPenetrationFrames} → ${remaining} penetration frames. ` +
+          (remaining >= originalPenetrationFrames
+            ? 'No safe improvement was found; the original motion was restored.'
+            : remaining > 0
+            ? 'Residual markers need manual review or another repair pass.'
+            : 'All detected penetrations cleared.'),
+      );
+      if (remaining < originalPenetrationFrames) {
+        this.keyframes.add(originalFrame);
+        this.updateKeyframeMarkers();
+      }
+      this.syncMotionWarningList();
+    } catch (error) {
+      clip.data.set(originalData);
+      this.motionPlayer.seek(originalFrame);
+      this.rebuildJointLimitAnalysis();
+      await this.analyzeCollisions();
+      const reason = error instanceof Error ? error.message : String(error);
+      window.alert(`Collision repair failed: ${reason}`);
+    } finally {
+      this.isRepairingCollisions = false;
+      this.repairCollisionsButton.textContent = 'Repair Collisions';
+      this.renderCollisionMarkers();
     }
   }
 
