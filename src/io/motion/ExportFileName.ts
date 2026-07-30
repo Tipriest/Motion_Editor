@@ -19,9 +19,10 @@ export function buildMotionExportFileName(
   playbackSpeed: number,
   formatSuffix: string | null,
   extension: string,
-  options: { mirrored?: boolean } = {},
+  options: { mirrored?: boolean; reversed?: boolean } = {},
 ): string {
   const mirrorSuffix = options.mirrored ? '_mirror' : '';
+  const reverseSuffix = options.reversed ? '_reverse' : '';
   const suffix = formatSuffix ? `_${formatSuffix}` : '';
-  return `${sanitizeBaseName(motionName)}_${formatSpeed(playbackSpeed)}${mirrorSuffix}${suffix}.${extension}`;
+  return `${sanitizeBaseName(motionName)}_${formatSpeed(playbackSpeed)}${mirrorSuffix}${reverseSuffix}${suffix}.${extension}`;
 }

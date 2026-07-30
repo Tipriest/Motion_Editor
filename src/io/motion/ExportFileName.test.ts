@@ -28,4 +28,16 @@ describe('buildMotionExportFileName', () => {
       ),
     ).toBe('turn_right_1x_mirror_ufo_training.pkl');
   });
+
+  it('places mirror and reverse transforms before the format suffix', () => {
+    expect(
+      buildMotionExportFileName(
+        'run_forward.npz',
+        1,
+        'dex_mosaic',
+        'npz',
+        { mirrored: true, reversed: true },
+      ),
+    ).toBe('run_forward_1x_mirror_reverse_dex_mosaic.npz');
+  });
 });

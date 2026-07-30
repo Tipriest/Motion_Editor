@@ -21,6 +21,7 @@ import { GmrMotionService } from '../io/motion/GmrMotionService';
 import { exportGmrNpz } from '../io/motion/GmrNpzService';
 import { retimeMotionClip } from '../io/motion/MotionClipResampling';
 import { mirrorMotionClipSagittal } from '../io/motion/MotionClipSagittalMirror';
+import { reverseMotionClipTime } from '../io/motion/MotionClipTimeReverse';
 import { RobotStateNpzMotionService } from '../io/motion/RobotStateNpzMotionService';
 import { SmplMotionService } from '../io/motion/SmplMotionService';
 import {
@@ -7168,6 +7169,23 @@ export class AppController {
     );
     settingsPanel.appendChild(mirrorField);
 
+    const reverseField = document.createElement('label');
+    reverseField.style.display = 'flex';
+    reverseField.style.alignItems = 'center';
+    reverseField.style.gap = '0.5rem';
+    reverseField.style.color = 'var(--text-main)';
+    reverseField.style.fontSize = '0.8rem';
+    reverseField.title =
+      'Reverse the output frame order and rebase root translation so the reversed motion starts at the original start position.';
+    const reverseCheckbox = document.createElement('input');
+    reverseCheckbox.type = 'checkbox';
+    reverseCheckbox.style.accentColor = 'var(--accent)';
+    reverseField.append(
+      reverseCheckbox,
+      document.createTextNode('Reverse Time (rebase root start)'),
+    );
+    settingsPanel.appendChild(reverseField);
+
     const limitWarningText = document.createElement('p');
     limitWarningText.style.display = 'none';
     limitWarningText.style.margin = '0';
@@ -7229,11 +7247,14 @@ export class AppController {
       };
       const selectedFps = fpsSelect.value === 'original' ? clip.fps : Number(fpsSelect.value);
       const retimedClip = retimeMotionClip(rangedClip, selectedFps, playbackSpeed);
-      return mirrorCheckbox.checked
+      const mirroredClip = mirrorCheckbox.checked
         ? mirrorMotionClipSagittal(retimedClip, {
             robot: this.lastLoadResult?.robot,
           })
         : retimedClip;
+      return reverseCheckbox.checked
+        ? reverseMotionClipTime(mirroredClip)
+        : mirroredClip;
     };
 
     const applyPreviewClip = (): void => {
@@ -7250,7 +7271,8 @@ export class AppController {
         outputSummary.textContent =
           `${nextClip.frameCount} frames · ${duration.toFixed(2)}s · ` +
           `${nextClip.fps} Hz · ${Number(speedInput.value).toFixed(2)}x` +
-          (mirrorCheckbox.checked ? ' · Mirrored' : '');
+          (mirrorCheckbox.checked ? ' · Mirrored' : '') +
+          (reverseCheckbox.checked ? ' · Reversed' : '');
         if (mirrorCheckbox.checked && this.lastLoadResult) {
           const limitAnalysis = this.jointLimitAnalysisService.analyze(
             nextClip,
@@ -7348,6 +7370,7 @@ export class AppController {
     }
     fpsSelect.addEventListener('change', applyPreviewClip);
     mirrorCheckbox.addEventListener('change', applyPreviewClip);
+    reverseCheckbox.addEventListener('change', applyPreviewClip);
 
     const renderPreview = (): void => {
       if (isClosed) {
@@ -7376,6 +7399,7 @@ export class AppController {
           Number(speedInput.value),
           {
             mirrored: mirrorCheckbox.checked,
+            reversed: reverseCheckbox.checked,
           },
         );
         closeDialog();
@@ -7466,6 +7490,7 @@ export class AppController {
     playbackSpeed = 1,
     options: {
       mirrored?: boolean;
+      reversed?: boolean;
     } = {},
   ): void {
     let content: string | Uint8Array;
