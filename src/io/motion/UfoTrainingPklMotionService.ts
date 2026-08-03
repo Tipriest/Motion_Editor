@@ -7,12 +7,7 @@ import {
 } from './PythonPickleIO';
 import { UFO_POLICY_JOINT_NAMES } from './UfoReferenceNpzService';
 
-const REQUIRED_RECORD_KEYS = [
-  'root_trans_offset',
-  'root_rot',
-  'dof_pos',
-  'fps',
-] as const;
+const REQUIRED_RECORD_KEYS = ['root_trans_offset', 'root_rot', 'fps'] as const;
 
 interface UfoTrainingRecordSelection {
   motionKey: string;
@@ -35,8 +30,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isUfoTrainingRecord(value: unknown): value is Record<string, unknown> {
   return (
     isRecord(value) &&
-    REQUIRED_RECORD_KEYS.every((key) => value[key] !== undefined)
+    REQUIRED_RECORD_KEYS.every((key) => value[key] !== undefined) &&
+    (value.dof_pos !== undefined || value.dof !== undefined)
   );
+}
+
+function getDofPosition(record: Record<string, unknown>): unknown {
+  return record.dof_pos ?? record.dof;
 }
 
 function selectRecord(
@@ -63,7 +63,7 @@ function selectRecord(
     );
   if (entries.length === 0) {
     throw new Error(
-      'PKL does not contain a UFO Training MotionLib record with root_trans_offset, root_rot, dof_pos, and fps.',
+      'PKL does not contain a UFO Training MotionLib record with root_trans_offset, root_rot, dof_pos (or legacy dof), and fps.',
     );
   }
   const selected =
@@ -154,8 +154,8 @@ function buildClip(
     'root_rot',
   );
   const jointPosition = parsePickleNdarrayFloat64(
-    selection.record.dof_pos,
-    'dof_pos',
+    getDofPosition(selection.record),
+    selection.record.dof_pos !== undefined ? 'dof_pos' : 'dof',
   );
   const frameCount = rootPosition.shape[0] ?? 0;
   if (frameCount <= 0) {
@@ -286,6 +286,14 @@ export class UfoTrainingPklMotionService {
     if (selection.availableMotionKeys.length > 1) {
       warnings.push(
         `PKL contains ${selection.availableMotionKeys.length} motions; loaded "${selection.motionKey}".`,
+      );
+    }
+    if (
+      selection.record.dof_pos === undefined &&
+      selection.record.dof !== undefined
+    ) {
+      warnings.push(
+        'Loaded legacy UFO Training PKL field "dof" as joint positions.',
       );
     }
     let clips = clipFileCache.get(file);

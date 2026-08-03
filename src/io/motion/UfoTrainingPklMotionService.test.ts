@@ -34,6 +34,25 @@ function createFile(payload: unknown, name = 'training.pkl'): File {
   return new File([new Uint8Array(writeNumpyPickle(payload))], name);
 }
 
+function createLegacyJoblibFile(): File {
+  const base64 = [
+    'gASV+wAAAAAAAAB9lIwMbGFmYW5fbW90aW9ulH2UKIwRcm9vdF90cmFuc19vZmZzZXSUjBNqb2JsaWIubnVtcHlfcGlja2xllIwR',
+    'TnVtcHlBcnJheVdyYXBwZXKUk5QpgZR9lCiMCHN1YmNsYXNzlIwFbnVtcHmUjAduZGFycmF5lJOUjAVzaGFwZZRLAksDhpSMBW9y',
+    'ZGVylIwBQ5SMBWR0eXBllGgKjAVkdHlwZZSTlIwCZjSUiYiHlFKUKEsDjAE8lE5OTkr/////Sv////9LAHSUYowKYWxsb3dfbW1h',
+    'cJSIjBtudW1weV9hcnJheV9hbGlnbm1lbnRfYnl0ZXOUSxB1Ygn///////////8AAIA/AAAAQAAAQEAAAIBAAACgQAAAwECVMAAA',
+    'AAAAAACMCHJvb3Rfcm90lGgGKYGUfZQoaAloDGgNSwJLBIaUaA9oEGgRaBZoGYhoGksQdWIO//////////////////8AAAAAAAAA',
+    'AAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAJUrAAAAAAAAAIwDZG9mlGgGKYGUfZQoaAloDGgNSwJLHYaUaA9oEGgRaBZoGYhoGksQ',
+    'dWIL//////////////8AAAAAAACAPwAAAEAAAEBAAACAQAAAoEAAAMBAAADgQAAAAEEAABBBAAAgQQAAMEEAAEBBAABQQQAAYEEA',
+    'AHBBAACAQQAAiEEAAJBBAACYQQAAoEEAAKhBAACwQQAAuEEAAMBBAADIQQAA0EEAANhBAADgQQAAyEIAAMpCAADMQgAAzkIAANBC',
+    'AADSQgAA1EIAANZCAADYQgAA2kIAANxCAADeQgAA4EIAAOJCAADkQgAA5kIAAOhCAADqQgAA7EIAAO5CAADwQgAA8kIAAPRCAAD2',
+    'QgAA+EIAAPpCAAD8QgAA/kIAAABDlQsAAAAAAAAAjANmcHOUSx51cy4=',
+  ].join('');
+  return new File(
+    [Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))],
+    'legacy-joblib.pkl',
+  );
+}
+
 describe('UfoTrainingPklMotionService', () => {
   it('loads a nested MotionLib record as an editable motion clip', async () => {
     const file = createFile({ walk: createRecord() });
@@ -64,6 +83,21 @@ describe('UfoTrainingPklMotionService', () => {
         ),
       ),
     ).toEqual([4, 5, 6, 0, 0, 1, 0]);
+  });
+
+  it('loads legacy UFO records that use dof without joint metadata', async () => {
+    const file = createLegacyJoblibFile();
+    const fileMap: DroppedFileMap = new Map([[file.name, file]]);
+    const service = new UfoTrainingPklMotionService();
+
+    expect(await service.findCompatiblePaths(fileMap)).toEqual([file.name]);
+
+    const result = await service.loadFromDroppedFiles(fileMap);
+    expect(result.selectedMotionKey).toBe('lafan_motion');
+    expect(result.clip.schema.jointNames).toEqual(UFO_POLICY_JOINT_NAMES);
+    expect(result.clip.data[7]).toBe(0);
+    expect(result.clip.data[result.clip.stride + 7]).toBe(100);
+    expect(result.warnings.join(' ')).toContain('legacy');
   });
 
   it('selects a deterministic record from a batch PKL and reports all keys', async () => {

@@ -5,6 +5,20 @@ export interface ParsedPickleNdarrayFloat64 {
   values: Float64Array;
 }
 
+interface PickleReader {
+  byte(): number;
+  bytes(length: number): Uint8Array;
+  uint16(): number;
+  int32(): number;
+  uint32(): number;
+  uint64(): number;
+  float64(): number;
+  skip(offset: number): void;
+  string(size: number, encoding: 'ascii' | 'utf-8'): string;
+  line(): string;
+  hasNext(): boolean;
+}
+
 interface SmplTensorFloat64 extends ParsedPickleNdarrayFloat64 {}
 
 interface SmplTensorInt32 {
@@ -46,6 +60,100 @@ function product(shape: number[]): number {
     total *= size;
   }
   return total;
+}
+
+class PickleBufferReader implements PickleReader {
+  private readonly bytesView: Uint8Array;
+  private readonly dataView: DataView;
+  private position = 0;
+
+  constructor(buffer: ArrayBuffer) {
+    this.bytesView = new Uint8Array(buffer);
+    this.dataView = new DataView(buffer);
+  }
+
+  byte(): number {
+    const value = this.dataView.getUint8(this.position);
+    this.skip(1);
+    return value;
+  }
+
+  bytes(length: number): Uint8Array {
+    const start = this.position;
+    this.skip(length);
+    return this.bytesView.subarray(start, this.position);
+  }
+
+  uint16(): number {
+    const value = this.dataView.getUint16(this.position, true);
+    this.skip(2);
+    return value;
+  }
+
+  int32(): number {
+    const value = this.dataView.getInt32(this.position, true);
+    this.skip(4);
+    return value;
+  }
+
+  uint32(): number {
+    const value = this.dataView.getUint32(this.position, true);
+    this.skip(4);
+    return value;
+  }
+
+  uint64(): number {
+    const low = this.uint32();
+    const high = this.uint32();
+    return low + high * 2 ** 32;
+  }
+
+  float64(): number {
+    const value = this.dataView.getFloat64(this.position, false);
+    this.skip(8);
+    return value;
+  }
+
+  skip(offset: number): void {
+    this.position += offset;
+    if (this.position > this.bytesView.length) {
+      throw new Error('Unexpected end of pickle data.');
+    }
+  }
+
+  string(size: number, encoding: 'ascii' | 'utf-8'): string {
+    return new TextDecoder(encoding).decode(this.bytes(size));
+  }
+
+  line(): string {
+    const end = this.bytesView.indexOf(0x0a, this.position);
+    if (end < 0) {
+      throw new Error('Could not find end of pickle line.');
+    }
+    const value = this.string(end - this.position, 'ascii');
+    this.skip(1);
+    return value;
+  }
+
+  hasNext(): boolean {
+    return this.position < this.bytesView.length;
+  }
+}
+
+function createPickleObject(module: string, name: string) {
+  const PickleObject = function (this: Record<string, unknown>, ...args: unknown[]) {
+    if (new.target) {
+      Object.defineProperty(this, 'args', { value: args });
+      return;
+    }
+    return Reflect.construct(PickleObject, args);
+  };
+  PickleObject.prototype.__module__ = module;
+  PickleObject.prototype.__name__ = name;
+  PickleObject.prototype.__setnewargs_ex__ = function (...kwargs: unknown[]) {
+    Object.defineProperty(this, 'kwargs', { value: kwargs });
+  };
+  return PickleObject;
 }
 
 function toFlatInt32(values: Float64Array): Int32Array {
@@ -267,11 +375,45 @@ function decodeNdarrayValues(
 }
 
 export function parsePythonPickleBuffer(buffer: ArrayBuffer): unknown {
+  const reader = new PickleBufferReader(buffer);
   const parser = new Parser({
     unpicklingTypeOfSet: 'array',
     unpicklingTypeOfDictionary: 'object',
+    nameResolver: {
+      resolve(module, name) {
+        if (module === 'joblib.numpy_pickle' && name === 'NumpyArrayWrapper') {
+          return class JoblibNumpyArrayWrapper {
+            __setstate__(state: Record<string, unknown>): void {
+              Object.assign(this, state);
+              const shapeRaw = state.shape;
+              if (!Array.isArray(shapeRaw)) {
+                throw new Error('Invalid joblib NumPy array shape.');
+              }
+              const shape = shapeRaw.map((size) => Math.trunc(Number(size)));
+              const descriptor = extractDescriptorFromPickleparserDtype(state.dtype);
+              const { typeCode, width } = parseDescriptor(descriptor);
+              if (typeCode === 'O') {
+                throw new Error('Object arrays in joblib pickle are not supported.');
+              }
+              if (state.numpy_array_alignment_bytes !== undefined) {
+                const paddingLength = reader.byte();
+                reader.skip(paddingLength);
+              }
+              const rawBytes = reader.bytes(product(shape) * width);
+              Object.assign(this, {
+                1: shape,
+                2: state.dtype,
+                3: state.order === 'F',
+                4: rawBytes,
+              });
+            }
+          };
+        }
+        return createPickleObject(module, name);
+      },
+    },
   });
-  return parser.parse(new Uint8Array(buffer));
+  return parser.read(reader);
 }
 
 function extractDescriptorFromPickleparserDtype(value: unknown): string {
