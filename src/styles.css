@@ -369,6 +369,10 @@ body {
   width: 110px;
 }
 
+.motion-browser__export-controls .motion-browser__format-select {
+  width: 170px;
+}
+
 .motion-browser__speed {
   width: 75px;
   padding: 0.5rem;
@@ -1625,6 +1629,22 @@ body {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
+}
+
+.joint-limit-readout {
+  grid-column: 1 / -1;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.joint-limit-readout[data-status='near'] {
+  color: #ffd24d;
+}
+
+.joint-limit-readout[data-status='violation'] {
+  color: #ff746d;
+  font-weight: 600;
 }
 
 .smooth-controls {

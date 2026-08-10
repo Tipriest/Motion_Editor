@@ -38,6 +38,7 @@ import { DEFAULT_ROOT_COMPONENT_COUNT } from '../io/motion/MotionSchema';
 import { ObjLoadService, type ObjModelLoadResult } from '../io/object/ObjLoadService';
 import { getBaseName, normalizePath } from '../io/urdf/pathResolver';
 import { UrdfLoadService } from '../io/urdf/UrdfLoadService';
+import { writeStoredZip } from '../io/ZipWriter';
 import { BvhMotionPlayer } from '../motion/BvhMotionPlayer';
 import {
   CenterOfMassService,
@@ -6461,7 +6462,7 @@ export class AppController {
     title.textContent = 'Motion Browser';
     const subtitle = document.createElement('p');
     subtitle.textContent =
-      'Browse one motion for editing, or select compatible motions for a combined UFO Training PKL.';
+      'Browse one motion for editing, or batch export selected motions as UFO Training or GMR PKL.';
     heading.append(title, subtitle);
     const closeButton = document.createElement('button');
     closeButton.type = 'button';
@@ -6502,6 +6503,7 @@ export class AppController {
     importInput.multiple = true;
     importInput.setAttribute('webkitdirectory', '');
     importInput.hidden = true;
+    let batchFormat: 'ufo-training' | 'gmr-pkl' = 'ufo-training';
     let batchFps = 50;
     let batchSpeed = 1;
     const expandedTreePaths = new Set<string>();
@@ -6721,6 +6723,14 @@ export class AppController {
       selectionPanel.innerHTML = '';
       const assets = this.getMotionBrowserAssets();
       const selected = assets.filter((asset) => this.motionBrowserSelectedIds.has(asset.id));
+      const isReadyForSelectedFormat = (
+        inspection: MotionBrowserInspection | undefined,
+      ): inspection is MotionBrowserInspection & { clip: MotionClip } =>
+        Boolean(
+          inspection?.status === 'ready' &&
+            inspection.clip &&
+            (batchFormat === 'gmr-pkl' || inspection.compatible),
+        );
       const selectionHeader = document.createElement('div');
       selectionHeader.className = 'motion-browser__selection-header';
       const headingElement = document.createElement('h3');
@@ -6746,9 +6756,10 @@ export class AppController {
       list.className = 'motion-browser__selection-list';
       for (const asset of selected) {
         const inspection = this.motionBrowserInspections.get(asset.id);
+        const isReady = isReadyForSelectedFormat(inspection);
         const card = document.createElement('article');
         card.className = `motion-browser__selection-card ${
-          inspection?.compatible ? 'is-compatible' : ''
+          isReady ? 'is-compatible' : ''
         }`;
         const name = document.createElement('strong');
         name.textContent = asset.path;
@@ -6758,7 +6769,11 @@ export class AppController {
             ? `${inspection.format} · ${inspection.clip.frameCount} frames · ${inspection.clip.fps} Hz`
             : inspection?.reason ?? 'Waiting for inspection…';
         const status = document.createElement('span');
-        status.textContent = inspection?.compatible ? 'Compatible' : inspection?.reason ?? 'Pending';
+        status.textContent = isReady
+          ? batchFormat === 'gmr-pkl'
+            ? 'Ready for GMR PKL'
+            : 'Ready for UFO Training PKL'
+          : inspection?.reason ?? 'Pending';
         card.append(name, metadata, status);
         list.appendChild(card);
       }
@@ -6772,6 +6787,25 @@ export class AppController {
 
       const exportControls = document.createElement('div');
       exportControls.className = 'motion-browser__export-controls';
+      const formatSelect = document.createElement('select');
+      formatSelect.className =
+        'preset-picker__select motion-browser__format-select';
+      for (const [value, label] of [
+        ['ufo-training', 'UFO Training PKL'],
+        ['gmr-pkl', 'GMR PKL (ZIP)'],
+      ] as const) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        option.selected = value === batchFormat;
+        formatSelect.appendChild(option);
+      }
+      formatSelect.setAttribute('aria-label', 'Batch export format');
+      formatSelect.addEventListener('change', () => {
+        batchFormat =
+          formatSelect.value === 'gmr-pkl' ? 'gmr-pkl' : 'ufo-training';
+        renderSelection();
+      });
       const fpsSelect = document.createElement('select');
       fpsSelect.className = 'preset-picker__select';
       for (const fps of [30, 50, 60, 100, 120]) {
@@ -6801,7 +6835,9 @@ export class AppController {
       const activeExport = this.motionBrowserBatchExportProgress;
       exportButton.textContent = activeExport
         ? `Exporting ${activeExport.completed}/${activeExport.total}…`
-        : 'Batch Export UFO Training PKL';
+        : batchFormat === 'gmr-pkl'
+          ? 'Batch Export GMR PKL'
+          : 'Batch Export UFO Training PKL';
       const readyItems = selected
         .map((asset) => ({ asset, inspection: this.motionBrowserInspections.get(asset.id) }))
         .filter(
@@ -6810,7 +6846,7 @@ export class AppController {
           ): item is {
             asset: MotionBrowserAsset;
             inspection: MotionBrowserInspection & { clip: MotionClip };
-          } => Boolean(item.inspection?.compatible && item.inspection.clip),
+          } => isReadyForSelectedFormat(item.inspection),
         );
       exportButton.disabled =
         Boolean(activeExport) || selected.length === 0 || readyItems.length !== selected.length;
@@ -6827,30 +6863,85 @@ export class AppController {
           this.motionBrowserBatchExportProgress = { completed: 0, total: readyItems.length };
           exportButton.disabled = true;
           exportButton.textContent = `Exporting 0/${readyItems.length}…`;
-          const pickleParts = await exportUfoTrainingPklBatchPartsAsync(
-            readyItems.map(({ asset, inspection }) => ({
-              clip: inspection.clip,
-              motionKey: asset.path.replace(/\.[^.]+$/, '').replace(/\//g, '__'),
-            })),
-            this.motionPlayer,
-            {
-              transformClip: (clip) => retimeMotionClip(clip, targetFps, speed),
-              onProgress: (completed, total) => {
-                this.motionBrowserBatchExportProgress = { completed, total };
-                exportButton.textContent = `Exporting ${completed}/${total}…`;
+          let blob: Blob;
+          let downloadName: string;
+          if (batchFormat === 'gmr-pkl') {
+            const encoder = new TextEncoder();
+            const usedNames = new Map<string, number>();
+            const zipEntries = [];
+            for (let index = 0; index < readyItems.length; index += 1) {
+              const { asset, inspection } = readyItems[index];
+              const transformedClip = retimeMotionClip(
+                inspection.clip,
+                targetFps,
+                speed,
+              );
+              const sourceName = asset.path
+                .replace(/\.[^.]+$/, '')
+                .replace(/[\\/]+/g, '__');
+              const proposedName = buildMotionExportFileName(
+                sourceName,
+                speed,
+                'gmr',
+                'pkl',
+              );
+              const duplicateIndex = usedNames.get(proposedName) ?? 0;
+              usedNames.set(proposedName, duplicateIndex + 1);
+              const entryName =
+                duplicateIndex === 0
+                  ? proposedName
+                  : proposedName.replace(/\.pkl$/, `_${duplicateIndex + 1}.pkl`);
+              zipEntries.push({
+                name: entryName,
+                data: encoder.encode(
+                  this.gmrMotionService.toGmrPkl(transformedClip),
+                ),
+              });
+              const completed = index + 1;
+              this.motionBrowserBatchExportProgress = {
+                completed,
+                total: readyItems.length,
+              };
+              exportButton.textContent =
+                `Exporting ${completed}/${readyItems.length}…`;
+              await new Promise<void>((resolve) =>
+                window.setTimeout(resolve, 0),
+              );
+            }
+            const zipBytes = writeStoredZip(zipEntries);
+            blob = new Blob([zipBytes.buffer as ArrayBuffer], {
+              type: 'application/zip',
+            });
+            downloadName =
+              `motion_batch_${readyItems.length}_${Number(speed.toFixed(4))}x_gmr.zip`;
+          } else {
+            const pickleParts = await exportUfoTrainingPklBatchPartsAsync(
+              readyItems.map(({ asset, inspection }) => ({
+                clip: inspection.clip,
+                motionKey: asset.path.replace(/\.[^.]+$/, '').replace(/\//g, '__'),
+              })),
+              this.motionPlayer,
+              {
+                transformClip: (clip) => retimeMotionClip(clip, targetFps, speed),
+                onProgress: (completed, total) => {
+                  this.motionBrowserBatchExportProgress = { completed, total };
+                  exportButton.textContent = `Exporting ${completed}/${total}…`;
+                },
               },
-            },
-          );
-          const blob = new Blob(
-            pickleParts.map((part) => part.buffer as ArrayBuffer),
-            {
-              type: 'application/octet-stream',
-            },
-          );
+            );
+            blob = new Blob(
+              pickleParts.map((part) => part.buffer as ArrayBuffer),
+              {
+                type: 'application/octet-stream',
+              },
+            );
+            downloadName =
+              `motion_batch_${readyItems.length}_${Number(speed.toFixed(4))}x_ufo_training.pkl`;
+          }
           const url = URL.createObjectURL(blob);
           const anchor = document.createElement('a');
           anchor.href = url;
-          anchor.download = `motion_batch_${readyItems.length}_${Number(speed.toFixed(4))}x_ufo_training.pkl`;
+          anchor.download = downloadName;
           anchor.click();
           window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
         } catch (error) {
@@ -6860,7 +6951,7 @@ export class AppController {
           renderSelection();
         }
       });
-      exportControls.append(fpsSelect, speedInput, exportButton);
+      exportControls.append(formatSelect, fpsSelect, speedInput, exportButton);
       selectionPanel.appendChild(exportControls);
     };
 
@@ -7660,6 +7751,82 @@ export class AppController {
     }
   }
 
+  private getJointEditorLimits(jointName: string): {
+    lower: number;
+    upper: number;
+    jointType: string;
+    hasUrdfLimits: boolean;
+  } {
+    const joint = (this.lastLoadResult?.robot.joints as any)?.[jointName];
+    const jointType = String(joint?.jointType ?? 'revolute').toLowerCase();
+    const lower = Number(joint?.limit?.lower);
+    const upper = Number(joint?.limit?.upper);
+    const hasUrdfLimits =
+      jointType !== 'continuous' &&
+      Number.isFinite(lower) &&
+      Number.isFinite(upper) &&
+      upper > lower;
+    if (hasUrdfLimits) {
+      return { lower, upper, jointType, hasUrdfLimits };
+    }
+    const fallback = jointType === 'prismatic' ? 1 : Math.PI;
+    return {
+      lower: -fallback,
+      upper: fallback,
+      jointType,
+      hasUrdfLimits: false,
+    };
+  }
+
+  private formatJointEditorValue(value: number, jointType: string): string {
+    return jointType === 'prismatic'
+      ? `${(value * 1_000).toFixed(1)} mm`
+      : `${((value * 180) / Math.PI).toFixed(1)}°`;
+  }
+
+  private updateJointLimitReadout(
+    readout: HTMLElement,
+    value: number,
+  ): void {
+    const lower = Number(readout.dataset.lower);
+    const upper = Number(readout.dataset.upper);
+    const jointType = readout.dataset.jointType ?? 'revolute';
+    const hasUrdfLimits = readout.dataset.hasUrdfLimits === 'true';
+    readout.dataset.status = 'normal';
+    if (!hasUrdfLimits) {
+      readout.textContent =
+        `Editor range ${this.formatJointEditorValue(lower, jointType)} – ` +
+        `${this.formatJointEditorValue(upper, jointType)} · no finite URDF limits`;
+      return;
+    }
+
+    const lowerDistance = value - lower;
+    const upperDistance = upper - value;
+    const nearestDistance = Math.min(lowerDistance, upperDistance);
+    const nearestBoundary = lowerDistance <= upperDistance ? 'lower' : 'upper';
+    const nearDistance = Math.max(
+      (upper - lower) * 0.05,
+      jointType === 'prismatic' ? 0.002 : (2 * Math.PI) / 180,
+    );
+    let distanceText: string;
+    if (nearestDistance < 0) {
+      readout.dataset.status = 'violation';
+      distanceText =
+        `${nearestBoundary} exceeded by ` +
+        this.formatJointEditorValue(Math.abs(nearestDistance), jointType);
+    } else {
+      if (nearestDistance <= nearDistance) {
+        readout.dataset.status = 'near';
+      }
+      distanceText =
+        `${this.formatJointEditorValue(nearestDistance, jointType)} to ` +
+        `${nearestBoundary} limit`;
+    }
+    readout.textContent =
+      `${this.formatJointEditorValue(lower, jointType)} – ` +
+      `${this.formatJointEditorValue(upper, jointType)} · ${distanceText}`;
+  }
+
   private renderJointPanel(jointNames: string[], jointValues: number[]): void {
     this.jointList.innerHTML = '';
 
@@ -7667,6 +7834,7 @@ export class AppController {
     this.addRootControls();
 
     jointNames.forEach((jointName, index) => {
+      const limits = this.getJointEditorLimits(jointName);
       const jointItem = document.createElement('div');
       jointItem.className = 'joint-item';
       jointItem.dataset.jointName = jointName;
@@ -7681,6 +7849,8 @@ export class AppController {
       jointInput.step = '0.01';
       jointInput.value = jointValues[index].toFixed(4);
       jointInput.dataset.jointName = jointName;
+      jointInput.min = limits.lower.toString();
+      jointInput.max = limits.upper.toString();
 
       jointInput.addEventListener('input', (event) => {
         const target = event.target as HTMLInputElement;
@@ -7699,11 +7869,20 @@ export class AppController {
       const jointSlider = document.createElement('input');
       jointSlider.className = 'joint-slider';
       jointSlider.type = 'range';
-      jointSlider.min = '-3.14';
-      jointSlider.max = '3.14';
+      jointSlider.min = limits.lower.toString();
+      jointSlider.max = limits.upper.toString();
       jointSlider.step = '0.01';
       jointSlider.value = jointValues[index].toString();
       jointSlider.dataset.jointName = jointName;
+
+      const limitReadout = document.createElement('span');
+      limitReadout.className = 'joint-limit-readout';
+      limitReadout.dataset.jointName = jointName;
+      limitReadout.dataset.lower = limits.lower.toString();
+      limitReadout.dataset.upper = limits.upper.toString();
+      limitReadout.dataset.jointType = limits.jointType;
+      limitReadout.dataset.hasUrdfLimits = limits.hasUrdfLimits ? 'true' : 'false';
+      this.updateJointLimitReadout(limitReadout, jointValues[index]);
 
       jointSlider.addEventListener('input', (event) => {
         const target = event.target as HTMLInputElement;
@@ -7819,6 +7998,7 @@ export class AppController {
       jointItem.appendChild(jointNameSpan);
       jointItem.appendChild(jointInput);
       jointItem.appendChild(jointSlider);
+      jointItem.appendChild(limitReadout);
       jointItem.appendChild(smoothControls);
       this.jointList.appendChild(jointItem);
     });
@@ -9225,6 +9405,8 @@ export class AppController {
     // 更新普通关节的值
     const jointInputs = this.jointList.querySelectorAll<HTMLInputElement>('.joint-input:not([data-root-control])');
     const jointSliders = this.jointList.querySelectorAll<HTMLInputElement>('.joint-slider:not([data-root-control])');
+    const jointLimitReadouts =
+      this.jointList.querySelectorAll<HTMLElement>('.joint-limit-readout');
 
     jointInputs.forEach((input, index) => {
       if (index < jointValues.length) {
@@ -9235,6 +9417,12 @@ export class AppController {
     jointSliders.forEach((slider, index) => {
       if (index < jointValues.length) {
         slider.value = jointValues[index].toString();
+      }
+    });
+
+    jointLimitReadouts.forEach((readout, index) => {
+      if (index < jointValues.length) {
+        this.updateJointLimitReadout(readout, jointValues[index]);
       }
     });
   }
