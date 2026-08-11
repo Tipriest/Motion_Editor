@@ -2718,6 +2718,7 @@ export class AppController {
     sourcePath: string,
     warnings: string[],
   ): void {
+    this.keyframes.clear();
     this.bvhMotionPlayer.load(null, null);
     this.motionPlayer.attachRobot(loadedRobotResult.robot);
     const bindingReport = this.motionPlayer.loadClip(clip);
@@ -4070,6 +4071,8 @@ export class AppController {
     this.currentMotionSourcePath = null;
     this.motionWarnings = [];
     this.motionFrameSnapshot = null;
+    this.keyframes.clear();
+    this.updateKeyframeMarkers();
     this.isMotionPlaying = false;
     this.hideJointPanel();
     this.syncMotionControls();
