@@ -167,102 +167,108 @@
             </p>
             <ul id="status-warnings" class="status-panel__warnings"></ul>
           </section>
-          <section id="motion-controls-section" class="motion-controls" hidden>
-            <div class="motion-controls__actions">
-              <button
-                id="view-mode-btn"
-                type="button"
-                class="toggle-chip active"
-              >
-                View: Root Lock
-              </button>
-              <button id="center-of-mass-btn" type="button" class="toggle-chip">
-                CoM: Off
-              </button>
-              <button id="ground-contacts-btn" type="button" class="toggle-chip">
-                Contacts: Off
-              </button>
+          <section id="motion-controls-section" hidden>
+            <div class="motion-controls">
+              <div class="motion-controls__actions">
+                <button
+                  id="view-mode-btn"
+                  type="button"
+                  class="toggle-chip active"
+                >
+                  View: Root Lock
+                </button>
+                <button id="center-of-mass-btn" type="button" class="toggle-chip">
+                  CoM: Off
+                </button>
+                <button id="ground-contacts-btn" type="button" class="toggle-chip">
+                  Contacts: Off
+                </button>
+              </div>
+              <div class="com-adjust-controls">
+                <span title="Robot coordinates, in meters">CoM offset (X forward · Y left · Z up)</span>
+                <label for="com-offset-x">X</label>
+                <input id="com-offset-x" type="number" step="0.005" value="0" />
+                <label for="com-offset-y">Y</label>
+                <input id="com-offset-y" type="number" step="0.005" value="0" />
+                <label for="com-offset-z">Z</label>
+                <input id="com-offset-z" type="number" step="0.005" value="0" />
+                <select id="com-foot-lock">
+                  <option value="both">Lock Both Feet</option>
+                  <option value="left">Lock Left Foot</option>
+                  <option value="right">Lock Right Foot</option>
+                </select>
+                <button id="apply-com-adjustment-btn" type="button" class="toggle-chip">
+                  Apply CoM
+                </button>
+              </div>
+              <div hidden>
+                <p class="motion-controls__export-info">
+                  Export supports CSV / PKL plus GMR NPZ, Tiangong3 UFO Training
+                  PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
+                </p>
+                <div
+                  id="motion-fps-control"
+                  class="motion-controls__fps"
+                  style="display: flex; gap: 1rem; margin-bottom: 0.5rem"
+                >
+                  <div style="flex: 1">
+                    <label for="motion-fps-input">FPS</label>
+                    <input
+                      id="motion-fps-input"
+                      class="motion-controls__fps-input"
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value="30"
+                      inputmode="decimal"
+                      style="width: 100%"
+                    />
+                  </div>
+                  <div style="flex: 1">
+                    <label for="motion-frame-count-input">Total Frames</label>
+                    <input
+                      id="motion-frame-count-input"
+                      class="motion-controls__fps-input"
+                      type="number"
+                      min="2"
+                      step="1"
+                      value="100"
+                      inputmode="numeric"
+                      style="width: 100%"
+                    />
+                    <div style="margin-top: 5px">
+                      <label for="frame-insert-position" style="font-size: 12px"
+                        >Insert Position:</label
+                      >
+                      <select
+                        id="frame-insert-position"
+                        style="
+                          width: 100%;
+                          background: #2a2a2a;
+                          color: #e0e0e0;
+                          border: 1px solid #444;
+                          padding: 4px;
+                          border-radius: 4px;
+                          font-size: 12px;
+                        "
+                      >
+                        <option value="end">Insert at End</option>
+                        <option value="start">Insert at Start</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <ul
+                id="motion-warnings"
+                class="status-panel__warnings motion-controls__warnings"
+              ></ul>
+            </div>
+            <div class="motion-controls">
               <button id="export-motion-btn" type="button" class="toggle-chip">
                 Export
               </button>
             </div>
-            <div class="com-adjust-controls">
-              <span title="Robot coordinates, in meters">CoM offset (X forward · Y left · Z up)</span>
-              <label for="com-offset-x">X</label>
-              <input id="com-offset-x" type="number" step="0.005" value="0" />
-              <label for="com-offset-y">Y</label>
-              <input id="com-offset-y" type="number" step="0.005" value="0" />
-              <label for="com-offset-z">Z</label>
-              <input id="com-offset-z" type="number" step="0.005" value="0" />
-              <select id="com-foot-lock">
-                <option value="both">Lock Both Feet</option>
-                <option value="left">Lock Left Foot</option>
-                <option value="right">Lock Right Foot</option>
-              </select>
-              <button id="apply-com-adjustment-btn" type="button" class="toggle-chip">
-                Apply CoM
-              </button>
-            </div>
-            <p class="motion-controls__export-info">
-              Export supports CSV / PKL plus GMR NPZ, Tiangong3 UFO Training
-              PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
-            </p>
-            <div
-              id="motion-fps-control"
-              class="motion-controls__fps"
-              style="display: flex; gap: 1rem; margin-bottom: 0.5rem"
-            >
-              <div style="flex: 1">
-                <label for="motion-fps-input">FPS</label>
-                <input
-                  id="motion-fps-input"
-                  class="motion-controls__fps-input"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value="30"
-                  inputmode="decimal"
-                  style="width: 100%"
-                />
-              </div>
-              <div style="flex: 1">
-                <label for="motion-frame-count-input">Total Frames</label>
-                <input
-                  id="motion-frame-count-input"
-                  class="motion-controls__fps-input"
-                  type="number"
-                  min="2"
-                  step="1"
-                  value="100"
-                  inputmode="numeric"
-                  style="width: 100%"
-                />
-                <div style="margin-top: 5px">
-                  <label for="frame-insert-position" style="font-size: 12px"
-                    >Insert Position:</label
-                  >
-                  <select
-                    id="frame-insert-position"
-                    style="
-                      width: 100%;
-                      background: #2a2a2a;
-                      color: #e0e0e0;
-                      border: 1px solid #444;
-                      padding: 4px;
-                      border-radius: 4px;
-                      font-size: 12px;
-                    "
-                  >
-                    <option value="end">Insert at End</option>
-                    <option value="start">Insert at Start</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <ul
-              id="motion-warnings"
-              class="status-panel__warnings motion-controls__warnings"
-            ></ul>
           </section>
           <section id="mode-props-panel" class="mode-props-panel" hidden>
             <p class="mode-props-panel__title">Mode Properties</p>
