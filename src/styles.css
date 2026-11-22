@@ -429,10 +429,24 @@ body {
   max-height: none !important;
 }
 
-.status-panel {
+.status-panel-group {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: calc(100vw - 2rem);
+  pointer-events: none;
+}
+
+.status-panel-group > * {
+  pointer-events: auto;
+}
+
+.status-panel {
+  position: relative;
+  min-width: 0;
   width: min(360px, calc(100vw - 2rem));
   max-height: calc(50vh - 1.5rem);
   overflow-x: hidden;
@@ -467,8 +481,20 @@ body {
 
 .status-panel__top {
   display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 0.62rem;
+}
+
+#format-supported-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.status-panel .panel-minimize-btn {
+  flex-shrink: 0;
 }
 
 .toggle-chip {
@@ -1134,6 +1160,97 @@ body {
   line-height: 1.6;
 }
 
+.supported-formats__intro,
+.supported-formats p {
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.supported-formats__category {
+  margin-top: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.supported-formats__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.supported-formats__tabs input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.supported-formats__tabs label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.65rem 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(3, 17, 39, 0.22);
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.supported-formats__tabs input:checked + label {
+  color: #2447a8;
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.supported-formats__tabs input:focus-visible + label {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+.supported-formats summary {
+  cursor: pointer;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.supported-formats__families {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.supported-formats__family {
+  padding: 0.65rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(3, 17, 39, 0.22);
+}
+
+.supported-formats__family > summary {
+  font-weight: 600;
+}
+
+.supported-formats__family > summary span {
+  margin-left: 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.supported-formats ul {
+  display: grid;
+  gap: 0.65rem;
+  padding-left: 1.2rem;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
 .motion-timeline__identity .motion-controls__title {
   max-width: min(32vw, 360px);
   overflow: hidden;
@@ -1480,15 +1597,29 @@ body {
   }
 
   .status-panel {
+    width: calc(100vw - 1.3rem);
+    min-height: 0;
+    max-height: inherit;
+  }
+
+  .status-panel-group {
     top: auto;
     right: 0.65rem;
     bottom: 0.65rem;
-    width: calc(100vw - 1.3rem);
+    flex-direction: column;
+    max-width: calc(100vw - 1.3rem);
     max-height: calc(48vh - 0.65rem);
   }
 
-  #app[data-has-motion='true'] .status-panel {
-    bottom: 8.2rem;
+  #format-supported-btn {
+    position: fixed;
+    top: 0.65rem;
+    right: 3.5rem;
+    z-index: 3;
+  }
+
+  #app[data-has-motion='true'] .status-panel-group {
+    bottom: calc(var(--motion-timeline-height, 0px) + 0.65rem);
     max-height: calc(48vh - 4.5rem);
   }
 

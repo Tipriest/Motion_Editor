@@ -105,177 +105,188 @@
         </div>
       </aside>
 
-      <aside id="status-panel" class="status-panel" aria-live="polite">
-        <div class="panel-header">
-          <div class="status-panel__top">
-            <span id="state-chip" class="state-chip">Idle</span>
-            <strong id="status-title">Waiting For Input</strong>
+      <div class="status-panel-group">
+        <button
+          id="format-supported-btn"
+          type="button"
+          class="toggle-chip"
+          aria-haspopup="dialog"
+          aria-controls="format-supported-dialog"
+        >
+          Format Supported
+        </button>
+        <aside id="status-panel" class="status-panel" aria-live="polite">
+          <div class="panel-header">
+            <div class="status-panel__top">
+              <strong id="status-title">Waiting For Input</strong>
+              <span id="state-chip" class="state-chip">Idle</span>
+            </div>
+            <button
+              id="status-panel-minimize"
+              class="panel-minimize-btn"
+              title="Minimize"
+            >
+              _
+            </button>
           </div>
-          <button
-            id="status-panel-minimize"
-            class="panel-minimize-btn"
-            title="Minimize"
-          >
-            _
-          </button>
-        </div>
-        <div class="panel-content">
-          <section class="shortcuts-panel" aria-label="Keyboard shortcuts">
-            <p class="shortcuts-panel__title">Shortcuts</p>
-            <ul class="shortcuts-panel__list">
-              <li>
-                <kbd>Tab</kbd>
-                <span>Switch view mode (Free / Root Lock)</span>
-              </li>
-              <li>
-                <kbd>Space</kbd>
-                <span>Play / Pause motion</span>
-              </li>
-              <li>
-                <kbd>R</kbd>
-                <span>Reset motion to frame 1</span>
-              </li>
-              <li>
-                <kbd>Shift</kbd>
-                <span>Toggle SMPL Mesh / Skeleton</span>
-              </li>
-            </ul>
-          </section>
-          <section id="model-panel" class="model-panel">
-            <div class="model-panel__top">
-              <p id="model-title" class="model-panel__title">Model</p>
-            </div>
-            <div id="urdf-visual-controls" class="model-panel__controls" hidden>
-              <button
-                id="show-visual-btn"
-                type="button"
-                class="toggle-chip active"
-              >
-                Visual
-              </button>
-              <button id="show-collision-btn" type="button" class="toggle-chip">
-                Collision
-              </button>
-            </div>
-            <p id="status-detail" class="status-panel__detail">
-              Drag and drop to load URDF / CSV / MimicKit PKL / GMR PKL / UFO
-              Reference or Robot-State NPZ / BVH / SMPL model (.npz/.pkl) +
-              motion (.npz).
-              <br />
-              Export supports: CSV, GMR PKL / NPZ, MimicKit PKL, Tiangong3 UFO
-              Training PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
-            </p>
-            <ul id="status-warnings" class="status-panel__warnings"></ul>
-          </section>
-          <section id="motion-controls-section" hidden>
-            <div class="motion-controls">
-              <div class="motion-controls__actions">
+          <div class="panel-content">
+            <section class="shortcuts-panel" aria-label="Keyboard shortcuts">
+              <p class="shortcuts-panel__title">Shortcuts</p>
+              <ul class="shortcuts-panel__list">
+                <li>
+                  <kbd>Tab</kbd>
+                  <span>Switch view mode (Free / Root Lock)</span>
+                </li>
+                <li>
+                  <kbd>Space</kbd>
+                  <span>Play / Pause motion</span>
+                </li>
+                <li>
+                  <kbd>R</kbd>
+                  <span>Reset motion to frame 1</span>
+                </li>
+                <li>
+                  <kbd>Shift</kbd>
+                  <span>Toggle SMPL Mesh / Skeleton</span>
+                </li>
+              </ul>
+            </section>
+            <section id="model-panel" class="model-panel">
+              <div class="model-panel__top">
+                <p id="model-title" class="model-panel__title">Model</p>
+              </div>
+              <div id="urdf-visual-controls" class="model-panel__controls" hidden>
                 <button
-                  id="view-mode-btn"
+                  id="show-visual-btn"
                   type="button"
                   class="toggle-chip active"
                 >
-                  View: Root Lock
+                  Visual
                 </button>
-                <button id="center-of-mass-btn" type="button" class="toggle-chip">
-                  CoM: Off
-                </button>
-                <button id="ground-contacts-btn" type="button" class="toggle-chip">
-                  Contacts: Off
+                <button id="show-collision-btn" type="button" class="toggle-chip">
+                  Collision
                 </button>
               </div>
-              <div class="com-adjust-controls">
-                <span title="Robot coordinates, in meters">CoM offset (X forward · Y left · Z up)</span>
-                <label for="com-offset-x">X</label>
-                <input id="com-offset-x" type="number" step="0.005" value="0" />
-                <label for="com-offset-y">Y</label>
-                <input id="com-offset-y" type="number" step="0.005" value="0" />
-                <label for="com-offset-z">Z</label>
-                <input id="com-offset-z" type="number" step="0.005" value="0" />
-                <select id="com-foot-lock">
-                  <option value="both">Lock Both Feet</option>
-                  <option value="left">Lock Left Foot</option>
-                  <option value="right">Lock Right Foot</option>
-                </select>
-                <button id="apply-com-adjustment-btn" type="button" class="toggle-chip">
-                  Apply CoM
-                </button>
-              </div>
-              <div hidden>
-                <p class="motion-controls__export-info">
-                  Export supports CSV / PKL plus GMR NPZ, Tiangong3 UFO Training
-                  PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
-                </p>
-                <div
-                  id="motion-fps-control"
-                  class="motion-controls__fps"
-                  style="display: flex; gap: 1rem; margin-bottom: 0.5rem"
-                >
-                  <div style="flex: 1">
-                    <label for="motion-fps-input">FPS</label>
-                    <input
-                      id="motion-fps-input"
-                      class="motion-controls__fps-input"
-                      type="number"
-                      min="0.1"
-                      step="0.1"
-                      value="30"
-                      inputmode="decimal"
-                      style="width: 100%"
-                    />
-                  </div>
-                  <div style="flex: 1">
-                    <label for="motion-frame-count-input">Total Frames</label>
-                    <input
-                      id="motion-frame-count-input"
-                      class="motion-controls__fps-input"
-                      type="number"
-                      min="2"
-                      step="1"
-                      value="100"
-                      inputmode="numeric"
-                      style="width: 100%"
-                    />
-                    <div style="margin-top: 5px">
-                      <label for="frame-insert-position" style="font-size: 12px"
-                        >Insert Position:</label
-                      >
-                      <select
-                        id="frame-insert-position"
-                        style="
-                          width: 100%;
-                          background: #2a2a2a;
-                          color: #e0e0e0;
-                          border: 1px solid #444;
-                          padding: 4px;
-                          border-radius: 4px;
-                          font-size: 12px;
-                        "
-                      >
-                        <option value="end">Insert at End</option>
-                        <option value="start">Insert at Start</option>
-                      </select>
+              <p id="status-detail" class="status-panel__detail">
+                Drag and drop to load URDF / CSV / MimicKit PKL / GMR PKL / UFO
+                Reference or Robot-State NPZ / BVH / SMPL model (.npz/.pkl) +
+                motion (.npz).
+                <br />
+                Export supports: CSV, GMR PKL / NPZ, MimicKit PKL, Tiangong3 UFO
+                Training PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
+              </p>
+              <ul id="status-warnings" class="status-panel__warnings"></ul>
+            </section>
+            <section id="motion-controls-section" hidden>
+              <div class="motion-controls">
+                <div class="motion-controls__actions">
+                  <button
+                    id="view-mode-btn"
+                    type="button"
+                    class="toggle-chip active"
+                  >
+                    View: Root Lock
+                  </button>
+                  <button id="center-of-mass-btn" type="button" class="toggle-chip">
+                    CoM: Off
+                  </button>
+                  <button id="ground-contacts-btn" type="button" class="toggle-chip">
+                    Contacts: Off
+                  </button>
+                </div>
+                <div class="com-adjust-controls">
+                  <span title="Robot coordinates, in meters">CoM offset (X forward · Y left · Z up)</span>
+                  <label for="com-offset-x">X</label>
+                  <input id="com-offset-x" type="number" step="0.005" value="0" />
+                  <label for="com-offset-y">Y</label>
+                  <input id="com-offset-y" type="number" step="0.005" value="0" />
+                  <label for="com-offset-z">Z</label>
+                  <input id="com-offset-z" type="number" step="0.005" value="0" />
+                  <select id="com-foot-lock">
+                    <option value="both">Lock Both Feet</option>
+                    <option value="left">Lock Left Foot</option>
+                    <option value="right">Lock Right Foot</option>
+                  </select>
+                  <button id="apply-com-adjustment-btn" type="button" class="toggle-chip">
+                    Apply CoM
+                  </button>
+                </div>
+                <div hidden>
+                  <p class="motion-controls__export-info">
+                    Export supports CSV / PKL plus GMR NPZ, Tiangong3 UFO Training
+                    PKL, UFO Tracking NPZ, and DEX_MOSAIC NPZ.
+                  </p>
+                  <div
+                    id="motion-fps-control"
+                    class="motion-controls__fps"
+                    style="display: flex; gap: 1rem; margin-bottom: 0.5rem"
+                  >
+                    <div style="flex: 1">
+                      <label for="motion-fps-input">FPS</label>
+                      <input
+                        id="motion-fps-input"
+                        class="motion-controls__fps-input"
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        value="30"
+                        inputmode="decimal"
+                        style="width: 100%"
+                      />
+                    </div>
+                    <div style="flex: 1">
+                      <label for="motion-frame-count-input">Total Frames</label>
+                      <input
+                        id="motion-frame-count-input"
+                        class="motion-controls__fps-input"
+                        type="number"
+                        min="2"
+                        step="1"
+                        value="100"
+                        inputmode="numeric"
+                        style="width: 100%"
+                      />
+                      <div style="margin-top: 5px">
+                        <label for="frame-insert-position" style="font-size: 12px"
+                          >Insert Position:</label
+                        >
+                        <select
+                          id="frame-insert-position"
+                          style="
+                            width: 100%;
+                            background: #2a2a2a;
+                            color: #e0e0e0;
+                            border: 1px solid #444;
+                            padding: 4px;
+                            border-radius: 4px;
+                            font-size: 12px;
+                          "
+                        >
+                          <option value="end">Insert at End</option>
+                          <option value="start">Insert at Start</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
+                <ul
+                  id="motion-warnings"
+                  class="status-panel__warnings motion-controls__warnings"
+                ></ul>
               </div>
-              <ul
-                id="motion-warnings"
-                class="status-panel__warnings motion-controls__warnings"
-              ></ul>
-            </div>
-            <div class="motion-controls">
-              <button id="export-motion-btn" type="button" class="toggle-chip">
-                Export
-              </button>
-            </div>
-          </section>
-          <section id="mode-props-panel" class="mode-props-panel" hidden>
-            <p class="mode-props-panel__title">Mode Properties</p>
-            <div id="mode-props-list" class="mode-props-panel__chips"></div>
-          </section>
-        </div>
-      </aside>
+              <div class="motion-controls">
+                <button id="export-motion-btn" type="button" class="toggle-chip">
+                  Export
+                </button>
+              </div>
+            </section>
+            <section id="mode-props-panel" class="mode-props-panel" hidden>
+              <p class="mode-props-panel__title">Mode Properties</p>
+              <div id="mode-props-list" class="mode-props-panel__chips"></div>
+            </section>
+          </div>
+        </aside>
+      </div>
       <div id="joint-control-stack" class="joint-control-stack" hidden>
         <details class="foot-control-panel" open>
           <summary class="foot-control-panel__title">Foot Control</summary>
@@ -453,6 +464,122 @@
       </div>
       <dl id="motion-info-details" class="motion-info-dialog__details"></dl>
       <ul id="motion-info-warnings" class="status-panel__warnings" hidden></ul>
+    </dialog>
+
+    <dialog
+      id="format-supported-dialog"
+      class="motion-info-dialog supported-formats"
+      aria-labelledby="format-supported-title"
+    >
+      <div class="motion-info-dialog__header">
+        <h2 id="format-supported-title">Format Supported</h2>
+        <button id="format-supported-close-btn" type="button" class="toggle-chip" autofocus>Close</button>
+      </div>
+      <div id="format-supported-categories" class="supported-formats__tabs" role="radiogroup" aria-label="Format category">
+        <input id="format-category-motion-import" type="radio" name="supported-format-category" value="motion-import" aria-controls="supported-format-motion-import" checked />
+        <label for="format-category-motion-import">Motion import</label>
+        <input id="format-category-model-import" type="radio" name="supported-format-category" value="model-import" aria-controls="supported-format-model-import" />
+        <label for="format-category-model-import">Model import</label>
+        <input id="format-category-motion-export" type="radio" name="supported-format-category" value="motion-export" aria-controls="supported-format-motion-export" />
+        <label for="format-category-motion-export">Motion export</label>
+      </div>
+      <p class="supported-formats__intro">Choose a category, then expand a format to see its supported variants.</p>
+
+      <section id="supported-format-motion-import" class="supported-formats__category" aria-label="Motion import">
+        <div class="supported-formats__families">
+          <details class="supported-formats__family">
+            <summary>BVH <span>.bvh</span></summary>
+            <ul>
+              <li><strong>Skeleton motion</strong> — e.g. LAFAN1. Includes its own skeleton; no URDF needed.</li>
+            </ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>CSV <span>.csv</span></summary>
+            <ul>
+              <li><strong>Named columns</strong> — joint names in the header.</li>
+              <li><strong>Ordered columns</strong> — root pose followed by joint values.</li>
+            </ul>
+            <p>Load the matching URDF robot first.</p>
+          </details>
+          <details class="supported-formats__family">
+            <summary>PKL <span>.pkl</span></summary>
+            <ul>
+              <li><strong>GMR</strong> — root pose and joint motion; includes Tiangong3 29 / 31 DOF mapping.</li>
+              <li><strong>MimicKit</strong> — frame-based root and joint motion matching the active robot.</li>
+              <li><strong>UFO Training / MotionLib</strong> — single-motion or multi-motion records, including legacy records.</li>
+            </ul>
+            <p>Load the matching URDF robot first.</p>
+          </details>
+          <details class="supported-formats__family">
+            <summary>NPZ <span>.npz</span></summary>
+            <ul>
+              <li><strong>GMR / Robot State</strong> — root pose and 29 joint DOF.</li>
+              <li><strong>UFO Tracking / Reference — Tiangong3</strong> — 29 joint DOF and 30 bodies.</li>
+              <li><strong>UFO Tracking / Reference — DEX EVT</strong> — 29 joint DOF and 39 bodies.</li>
+              <li><strong>SMPL-family motion</strong> — pose and translation archives, including AMASS-style motion.</li>
+            </ul>
+            <p>Robot motions require a matching URDF. SMPL motion requires a compatible SMPL-family model.</p>
+          </details>
+        </div>
+      </section>
+
+      <section id="supported-format-model-import" class="supported-formats__category" aria-label="Model import" hidden>
+        <div class="supported-formats__families">
+          <details class="supported-formats__family">
+            <summary>URDF <span>.urdf</span></summary>
+            <ul>
+              <li><strong>Robot model</strong> — e.g. Tiangong3, EVT2, G1, H1 and H1-2.</li>
+              <li><strong>Mesh resources</strong> — include the STL / OBJ / DAE files referenced by the URDF.</li>
+            </ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>NPZ <span>.npz</span></summary>
+            <ul>
+              <li><strong>SMPL</strong> — human body model.</li>
+              <li><strong>SMPL-H</strong> — body and hand model.</li>
+              <li><strong>SMPL-X</strong> — body, hand and face model.</li>
+            </ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>PKL <span>.pkl</span></summary>
+            <ul>
+              <li><strong>Legacy SMPL / smpl_webuser</strong> — basicmodel_*_lbs_*.pkl model files.</li>
+            </ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>OBJ <span>.obj</span></summary>
+            <ul>
+              <li><strong>Object mesh</strong> — standalone object preview or an object for an SMPL scene.</li>
+            </ul>
+          </details>
+        </div>
+      </section>
+
+      <section id="supported-format-motion-export" class="supported-formats__category" aria-label="Motion export" hidden>
+        <p>Export is available for URDF robot motions. Available choices depend on the active robot and source format.</p>
+        <div class="supported-formats__families">
+          <details class="supported-formats__family">
+            <summary>CSV <span>.csv</span></summary>
+            <ul><li><strong>CSV motion</strong> — export edited CSV motions.</li></ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>PKL <span>.pkl</span></summary>
+            <ul>
+              <li><strong>GMR</strong> — source-format export; batch conversion is also available in Motion Browser.</li>
+              <li><strong>MimicKit</strong> — source-format export.</li>
+              <li><strong>UFO Training / MotionLib</strong> — Tiangong3 training motion; supports batch export.</li>
+            </ul>
+          </details>
+          <details class="supported-formats__family">
+            <summary>NPZ <span>.npz</span></summary>
+            <ul>
+              <li><strong>GMR / Robot State</strong> — root pose and 29 joint DOF.</li>
+              <li><strong>UFO Tracking / Reference</strong> — Tiangong3 30-body or DEX EVT 39-body layout.</li>
+              <li><strong>DEX_MOSAIC</strong> — 39-body tracking layout, available for Tiangong3.</li>
+            </ul>
+          </details>
+        </div>
+      </section>
     </dialog>
 
     <input

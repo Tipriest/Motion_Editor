@@ -95,6 +95,18 @@ function requireElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+function closeDialogOnBackdropClick(event: MouseEvent, dialog: HTMLDialogElement): void {
+  if (event.target !== dialog) return;
+  // Backdrop clicks target the dialog; preserve clicks within its border box.
+  const bounds = dialog.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left || event.clientX > bounds.right ||
+    event.clientY < bounds.top || event.clientY > bounds.bottom
+  ) {
+    dialog.close();
+  }
+}
+
 function isBvhLinearUnit(value: string): value is BvhLinearUnit {
   return BVH_LINEAR_UNITS.includes(value as BvhLinearUnit);
 }
@@ -1012,6 +1024,9 @@ export class AppController {
   private readonly motionInfoCloseButton: HTMLButtonElement;
   private readonly motionInfoDetails: HTMLDListElement;
   private readonly motionInfoWarnings: HTMLUListElement;
+  private readonly formatSupportedButton: HTMLButtonElement;
+  private readonly formatSupportedDialog: HTMLDialogElement;
+  private readonly formatSupportedCloseButton: HTMLButtonElement;
   private motionInfoSignature = '';
   private readonly motionPlayButton: HTMLButtonElement;
   private readonly motionResetButton: HTMLButtonElement;
@@ -1176,7 +1191,7 @@ export class AppController {
   };
 
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
-    if (this.motionInfoDialog.open) {
+    if (this.motionInfoDialog.open || this.formatSupportedDialog.open) {
       return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.repeat) {
@@ -1243,15 +1258,29 @@ export class AppController {
   };
 
   private readonly onMotionInfoBackdropClick = (event: MouseEvent): void => {
-    if (event.target !== this.motionInfoDialog) return;
-    // Backdrop clicks target the dialog; preserve clicks within its border box.
-    const bounds = this.motionInfoDialog.getBoundingClientRect();
-    if (
-      event.clientX < bounds.left || event.clientX > bounds.right ||
-      event.clientY < bounds.top || event.clientY > bounds.bottom
-    ) {
-      this.motionInfoDialog.close();
+    closeDialogOnBackdropClick(event, this.motionInfoDialog);
+  };
+
+  private readonly onFormatSupportedClick = (): void => {
+    if (!this.formatSupportedDialog.open) this.formatSupportedDialog.showModal();
+  };
+
+  private readonly onFormatSupportedCloseClick = (): void => {
+    this.formatSupportedDialog.close();
+  };
+
+  private readonly onFormatSupportedCategoryChange = (event: Event): void => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.name !== 'supported-format-category' || !input.checked) {
+      return;
     }
+    const selectedPanel = input.getAttribute('aria-controls');
+    this.formatSupportedDialog.querySelectorAll<HTMLElement>('.supported-formats__category')
+      .forEach((panel) => { panel.hidden = panel.id !== selectedPanel; });
+  };
+
+  private readonly onFormatSupportedBackdropClick = (event: MouseEvent): void => {
+    closeDialogOnBackdropClick(event, this.formatSupportedDialog);
   };
 
   private readonly onFileInputChange = (): void => {
@@ -2063,6 +2092,9 @@ export class AppController {
     this.motionInfoCloseButton = requireElement<HTMLButtonElement>('motion-info-close-btn');
     this.motionInfoDetails = requireElement<HTMLDListElement>('motion-info-details');
     this.motionInfoWarnings = requireElement<HTMLUListElement>('motion-info-warnings');
+    this.formatSupportedButton = requireElement<HTMLButtonElement>('format-supported-btn');
+    this.formatSupportedDialog = requireElement<HTMLDialogElement>('format-supported-dialog');
+    this.formatSupportedCloseButton = requireElement<HTMLButtonElement>('format-supported-close-btn');
     this.motionPlayButton = requireElement<HTMLButtonElement>('motion-play-btn');
     this.motionResetButton = requireElement<HTMLButtonElement>('motion-reset-btn');
     this.motionFpsControl = requireElement<HTMLDivElement>('motion-fps-control');
@@ -2279,6 +2311,10 @@ export class AppController {
     this.motionInfoButton.addEventListener('click', this.onMotionInfoClick);
     this.motionInfoCloseButton.addEventListener('click', this.onMotionInfoCloseClick);
     this.motionInfoDialog.addEventListener('click', this.onMotionInfoBackdropClick);
+    this.formatSupportedButton.addEventListener('click', this.onFormatSupportedClick);
+    this.formatSupportedCloseButton.addEventListener('click', this.onFormatSupportedCloseClick);
+    this.formatSupportedDialog.addEventListener('click', this.onFormatSupportedBackdropClick);
+    this.formatSupportedDialog.addEventListener('change', this.onFormatSupportedCategoryChange);
     this.motionResetButton.addEventListener('click', this.onMotionResetClick);
     this.motionFpsInput.addEventListener('input', this.onMotionFpsInput);
     this.motionFpsInput.addEventListener('change', this.onMotionFpsChange);
@@ -2361,6 +2397,11 @@ export class AppController {
     this.motionInfoButton.removeEventListener('click', this.onMotionInfoClick);
     this.motionInfoCloseButton.removeEventListener('click', this.onMotionInfoCloseClick);
     this.motionInfoDialog.removeEventListener('click', this.onMotionInfoBackdropClick);
+    this.formatSupportedDialog.close();
+    this.formatSupportedButton.removeEventListener('click', this.onFormatSupportedClick);
+    this.formatSupportedCloseButton.removeEventListener('click', this.onFormatSupportedCloseClick);
+    this.formatSupportedDialog.removeEventListener('click', this.onFormatSupportedBackdropClick);
+    this.formatSupportedDialog.removeEventListener('change', this.onFormatSupportedCategoryChange);
     this.motionTimelineResizeObserver.disconnect();
     this.removeDropHandlers();
     window.removeEventListener('resize', this.onWindowResize);
