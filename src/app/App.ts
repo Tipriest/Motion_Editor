@@ -1241,6 +1241,18 @@ export class AppController {
     this.motionInfoDialog.close();
   };
 
+  private readonly onMotionInfoBackdropClick = (event: MouseEvent): void => {
+    if (event.target !== this.motionInfoDialog) return;
+    // Backdrop clicks target the dialog; preserve clicks within its border box.
+    const bounds = this.motionInfoDialog.getBoundingClientRect();
+    if (
+      event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom
+    ) {
+      this.motionInfoDialog.close();
+    }
+  };
+
   private readonly onFileInputChange = (): void => {
     void this.handlePickedFiles(this.fileInput.files);
   };
@@ -2259,6 +2271,7 @@ export class AppController {
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
     this.motionInfoButton.addEventListener('click', this.onMotionInfoClick);
     this.motionInfoCloseButton.addEventListener('click', this.onMotionInfoCloseClick);
+    this.motionInfoDialog.addEventListener('click', this.onMotionInfoBackdropClick);
     this.motionResetButton.addEventListener('click', this.onMotionResetClick);
     this.motionFpsInput.addEventListener('input', this.onMotionFpsInput);
     this.motionFpsInput.addEventListener('change', this.onMotionFpsChange);
@@ -2340,6 +2353,7 @@ export class AppController {
     this.motionInfoDialog.close();
     this.motionInfoButton.removeEventListener('click', this.onMotionInfoClick);
     this.motionInfoCloseButton.removeEventListener('click', this.onMotionInfoCloseClick);
+    this.motionInfoDialog.removeEventListener('click', this.onMotionInfoBackdropClick);
     this.motionTimelineResizeObserver.disconnect();
     this.removeDropHandlers();
     window.removeEventListener('resize', this.onWindowResize);

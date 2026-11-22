@@ -1064,6 +1064,10 @@ body {
 }
 
 .motion-info-dialog {
+  --text-main: #ffffff;
+  --text-muted: #f5f7ff;
+  --accent-strong: #ffffff;
+  --warning: #fff8e6;
   width: min(720px, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
   overflow: auto;
@@ -1071,7 +1075,7 @@ body {
   border: 1px solid rgba(146, 205, 236, 0.55);
   border-radius: 20px;
   color: var(--text-main);
-  background: rgba(6, 14, 19, 0.99);
+  background: rgba(65, 105, 225, 0.88);
   box-shadow: 0 30px 70px rgba(1, 7, 10, 0.65);
 }
 
