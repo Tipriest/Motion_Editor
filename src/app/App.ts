@@ -84,6 +84,7 @@ import {
   type UrdfMotionKind,
 } from './MotionFormatModes';
 import { getStateCopy } from './state';
+import { buildMotionInfoRows, type MotionInfo } from './MotionInfo';
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -1006,6 +1007,12 @@ export class AppController {
   private readonly motionControlsSection: HTMLElement;
   private readonly motionTimelineSection: HTMLElement;
   private readonly motionTimelineResizeObserver: ResizeObserver;
+  private readonly motionInfoButton: HTMLButtonElement;
+  private readonly motionInfoDialog: HTMLDialogElement;
+  private readonly motionInfoCloseButton: HTMLButtonElement;
+  private readonly motionInfoDetails: HTMLDListElement;
+  private readonly motionInfoWarnings: HTMLUListElement;
+  private motionInfoSignature = '';
   private readonly motionPlayButton: HTMLButtonElement;
   private readonly motionResetButton: HTMLButtonElement;
   private readonly motionFpsControl: HTMLDivElement;
@@ -1089,6 +1096,7 @@ export class AppController {
         modelSourcePath: string;
         motionName: string;
         motionSourcePath: string;
+        sourceJointCount: number;
         frameCount: number;
         fps: number;
         jointCount: number;
@@ -1167,6 +1175,9 @@ export class AppController {
   };
 
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
+    if (this.motionInfoDialog.open) {
+      return;
+    }
     if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.repeat) {
       return;
     }
@@ -1218,6 +1229,16 @@ export class AppController {
 
   private readonly onFolderInputChange = (): void => {
     void this.handlePickedFiles(this.folderInput.files);
+  };
+
+  private readonly onMotionInfoClick = (): void => {
+    if (!this.hasAnyMotion()) return;
+    if (!this.motionInfoDialog.open) this.motionInfoDialog.showModal();
+    this.syncMotionInfo();
+  };
+
+  private readonly onMotionInfoCloseClick = (): void => {
+    this.motionInfoDialog.close();
   };
 
   private readonly onFileInputChange = (): void => {
@@ -2024,6 +2045,11 @@ export class AppController {
     this.modePropsList = requireElement<HTMLDivElement>('mode-props-list');
     this.motionControlsSection = requireElement<HTMLElement>('motion-controls-section');
     this.motionTimelineSection = requireElement<HTMLElement>('motion-timeline-section');
+    this.motionInfoButton = requireElement<HTMLButtonElement>('motion-info-btn');
+    this.motionInfoDialog = requireElement<HTMLDialogElement>('motion-info-dialog');
+    this.motionInfoCloseButton = requireElement<HTMLButtonElement>('motion-info-close-btn');
+    this.motionInfoDetails = requireElement<HTMLDListElement>('motion-info-details');
+    this.motionInfoWarnings = requireElement<HTMLUListElement>('motion-info-warnings');
     this.motionPlayButton = requireElement<HTMLButtonElement>('motion-play-btn');
     this.motionResetButton = requireElement<HTMLButtonElement>('motion-reset-btn');
     this.motionFpsControl = requireElement<HTMLDivElement>('motion-fps-control');
@@ -2231,6 +2257,8 @@ export class AppController {
     this.urdfSelect.addEventListener('change', this.onUrdfSelectChange);
     this.smplModelSelect.addEventListener('change', this.onSmplModelSelectChange);
     this.motionPlayButton.addEventListener('click', this.onMotionPlayClick);
+    this.motionInfoButton.addEventListener('click', this.onMotionInfoClick);
+    this.motionInfoCloseButton.addEventListener('click', this.onMotionInfoCloseClick);
     this.motionResetButton.addEventListener('click', this.onMotionResetClick);
     this.motionFpsInput.addEventListener('input', this.onMotionFpsInput);
     this.motionFpsInput.addEventListener('change', this.onMotionFpsChange);
@@ -2309,6 +2337,9 @@ export class AppController {
 
   dispose(): void {
     this.clearRecoverReadyTimer();
+    this.motionInfoDialog.close();
+    this.motionInfoButton.removeEventListener('click', this.onMotionInfoClick);
+    this.motionInfoCloseButton.removeEventListener('click', this.onMotionInfoCloseClick);
     this.motionTimelineResizeObserver.disconnect();
     this.removeDropHandlers();
     window.removeEventListener('resize', this.onWindowResize);
@@ -3035,6 +3066,7 @@ export class AppController {
         modelSourcePath: result.selectedModelPath,
         motionName: result.motionName,
         motionSourcePath: result.selectedMotionPath,
+        sourceJointCount: Math.floor(result.clip.poseStride / 3),
         frameCount: result.frameCount,
         fps: result.fps,
         jointCount: result.jointCount,
@@ -5089,8 +5121,73 @@ export class AppController {
       : 'CoM adjustment requires an editable URDF motion with resolved foot geometry.';
   }
 
+  private syncMotionInfo(): void {
+    if (!this.hasAnyMotion()) {
+      this.motionInfoDialog.close();
+      this.motionInfoDetails.replaceChildren();
+      this.motionInfoWarnings.replaceChildren();
+      this.motionInfoSignature = '';
+      return;
+    }
+    if (!this.motionInfoDialog.open) return;
+
+    let info: MotionInfo | null = null;
+    const clip = this.currentMotionClip;
+    if (isUrdfMotionKind(this.currentMotionKind) && clip) {
+      info = {
+        kind: this.currentMotionKind,
+        name: clip.name,
+        sourcePath: this.currentMotionSourcePath ?? clip.sourcePath,
+        fps: clip.fps,
+        frameCount: clip.frameCount,
+        jointCount: clip.schema.jointNames.length,
+        sourceJointCount: clip.sourceJointCount ??
+          (this.currentMotionKind === 'csv' ? undefined : clip.schema.jointNames.length),
+        model: this.lastLoadResult?.selectedUrdfPath,
+        csvMode: clip.csvMode,
+      };
+    } else if (this.currentMotionKind === 'bvh' && this.currentBvhMotion) {
+      info = { kind: 'bvh', ...this.currentBvhMotion };
+    } else if (this.currentMotionKind === 'smpl' && this.currentSmplMotion) {
+      const motion = this.currentSmplMotion;
+      info = {
+        kind: 'smpl',
+        name: motion.motionName,
+        sourcePath: motion.motionSourcePath,
+        fps: motion.fps,
+        frameCount: motion.frameCount,
+        jointCount: motion.jointCount,
+        sourceJointCount: motion.sourceJointCount,
+        model: motion.modelSourcePath,
+      };
+    }
+    if (!info) return;
+
+    const rows = buildMotionInfoRows(info);
+    const signature = JSON.stringify([rows, this.motionWarnings]);
+    if (signature === this.motionInfoSignature) return;
+    this.motionInfoSignature = signature;
+    this.motionInfoDetails.replaceChildren();
+    for (const [label, value] of rows) {
+      const term = document.createElement('dt');
+      const description = document.createElement('dd');
+      term.textContent = label;
+      description.textContent = value;
+      this.motionInfoDetails.append(term, description);
+    }
+    this.motionInfoWarnings.replaceChildren();
+    for (const warning of this.motionWarnings) {
+      const item = document.createElement('li');
+      item.textContent = warning;
+      this.motionInfoWarnings.appendChild(item);
+    }
+    this.motionInfoWarnings.hidden = this.motionWarnings.length === 0;
+  }
+
   private syncMotionControls(): void {
     const hasMotion = this.hasAnyMotion();
+    this.motionInfoButton.disabled = !hasMotion;
+    this.syncMotionInfo();
     this.appRoot.dataset.hasMotion = hasMotion ? 'true' : 'false';
     this.motionControlsSection.hidden = !hasMotion;
     this.motionTimelineSection.hidden = !hasMotion;

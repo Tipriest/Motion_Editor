@@ -46,6 +46,7 @@ describe('GmrMotionService Tiangong3 joint layouts', () => {
 
     expect(result.clip.schema.jointNames).toEqual([...TIANGONG3_JOINT_NAMES_31]);
     expect(result.clip.stride).toBe(38);
+    expect(result.clip.sourceJointCount).toBe(29);
     expect(result.clip.data[7 + 14]).toBeCloseTo(14.25);
     expect(result.clip.data[7 + 15]).toBe(0);
     expect(result.clip.data[7 + 16]).toBe(0);

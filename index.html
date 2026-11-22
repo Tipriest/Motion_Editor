@@ -337,6 +337,15 @@
       <div class="motion-timeline__toolbar">
         <div class="motion-timeline__identity">
           <p id="motion-title" class="motion-controls__title">Motion</p>
+          <button
+            id="motion-info-btn"
+            type="button"
+            class="toggle-chip motion-timeline__info"
+            aria-haspopup="dialog"
+            aria-controls="motion-info-dialog"
+          >
+            Motion Info
+          </button>
           <span id="motion-frame-label" class="motion-controls__frame"
             >Frame 0 / 0</span
           >
@@ -417,6 +426,15 @@
         </button>
       </div>
     </section>
+
+    <dialog id="motion-info-dialog" class="motion-info-dialog" aria-labelledby="motion-info-title">
+      <div class="motion-info-dialog__header">
+        <h2 id="motion-info-title">Motion Info</h2>
+        <button id="motion-info-close-btn" type="button" class="toggle-chip" autofocus>Close</button>
+      </div>
+      <dl id="motion-info-details" class="motion-info-dialog__details"></dl>
+      <ul id="motion-info-warnings" class="status-panel__warnings" hidden></ul>
+    </dialog>
 
     <input
       id="folder-input"

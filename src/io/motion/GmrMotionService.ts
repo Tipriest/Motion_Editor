@@ -415,6 +415,7 @@ function buildMotionClip(
       schema: cloneMotionSchema(motionSchema, mapping.outputJointNames),
       csvMode: 'ordered',
       sourceColumnCount: DEFAULT_ROOT_COMPONENT_COUNT + payload.jointCount,
+      sourceJointCount: payload.jointCount,
       data,
     },
     warnings: mapping.warning ? [mapping.warning] : [],

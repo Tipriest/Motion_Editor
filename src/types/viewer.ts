@@ -55,6 +55,8 @@ export interface MotionClip {
   schema: MotionSchema;
   csvMode: MotionCsvMode;
   sourceColumnCount: number;
+  /** Joint count before any model-specific mapping, when known. */
+  sourceJointCount?: number;
   data: Float32Array;
 }
 
