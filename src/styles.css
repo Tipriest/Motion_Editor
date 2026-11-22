@@ -1515,14 +1515,25 @@ body {
   }
 }
 
-.joint-panel {
-  --joint-panel-top: calc(50vh + 1.5rem);
+.joint-control-stack {
+  --joint-controls-top: calc(var(--dataset-panel-bottom, 50vh) + 0.75rem);
   position: absolute;
-  top: var(--joint-panel-top);
+  top: var(--joint-controls-top);
   left: 1rem;
   width: min(280px, calc(100vw - 2rem));
-  /* Keep the scrollable panel above the timeline at every viewport size. */
-  max-height: calc(100% - var(--joint-panel-top) - var(--motion-timeline-height, 0px) - 1rem);
+  height: calc(100% - var(--joint-controls-top) - var(--motion-timeline-height, 0px) - 1rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  z-index: 1;
+}
+
+.joint-control-stack[hidden] {
+  display: none;
+}
+
+.foot-control-panel,
+.joint-panel {
   overflow-x: hidden;
   overflow-y: auto;
   background: rgba(6, 12, 17, 0.72);
@@ -1531,13 +1542,65 @@ body {
   padding: 0.6rem 0.7rem;
   box-shadow: 0 12px 24px rgba(1, 7, 10, 0.33);
   backdrop-filter: blur(8px) saturate(120%);
-  z-index: 1;
-  transition: top 0.3s ease;
 }
 
-/* When dataset panel is minimized, adjust joint panel position and height */
-#dataset-panel[data-minimized="true"] + #status-panel + #joint-panel {
-  --joint-panel-top: 4rem;
+.foot-control-panel {
+  flex: 0 1 auto;
+  max-height: max(3.1rem, calc(100% - 7rem));
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 128, 128, 0.34) transparent;
+}
+
+.foot-control-panel__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.7rem;
+  list-style: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.foot-control-panel__title::-webkit-details-marker {
+  display: none;
+}
+
+.foot-control-panel__title::after {
+  content: '+';
+  font-size: 1.1rem;
+}
+
+.foot-control-panel[open] > summary::after {
+  content: '−';
+}
+
+.foot-control-panel .foot-lock-controls {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(146, 205, 236, 0.2);
+}
+
+.foot-control-panel .foot-lock-controls > span:first-child {
+  flex-basis: 100%;
+}
+
+.foot-control-panel__row {
+  display: flex;
+  align-items: center;
+  flex-basis: 100%;
+  gap: 0.42rem;
+}
+
+.joint-panel {
+  flex: 1;
+  min-height: 3.1rem;
+}
+
+.joint-panel[data-collapsed='true'] {
+  flex: 0 0 auto;
 }
 
 .joint-panel::-webkit-scrollbar {
@@ -1916,12 +1979,16 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .joint-panel {
-    top: auto;
+  .joint-control-stack {
+    top: var(--joint-controls-top);
     bottom: calc(var(--motion-timeline-height, 0px) + 0.65rem);
     right: 0.65rem;
     left: auto;
     width: calc(100vw - 1.3rem);
-    max-height: min(50vh, calc(100% - var(--motion-timeline-height, 0px) - 1.3rem));
+    height: calc(100% - var(--joint-controls-top) - var(--motion-timeline-height, 0px) - 0.65rem);
+  }
+
+  #app[data-has-joint-controls='true'] .dataset-panel {
+    max-height: min(52vh, calc(100% - var(--motion-timeline-height, 0px) - 12rem));
   }
 }

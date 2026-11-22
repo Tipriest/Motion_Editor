@@ -1049,6 +1049,7 @@ export class AppController {
   private readonly statusPanel: HTMLElement;
   private readonly statusPanelMinimizeBtn: HTMLButtonElement;
   private readonly jointPanel: HTMLElement;
+  private readonly jointControlStack: HTMLDivElement;
   private readonly jointPanelToggle: HTMLButtonElement;
   private readonly jointPanelContent: HTMLDivElement;
   private readonly jointList: HTMLDivElement;
@@ -2109,6 +2110,7 @@ export class AppController {
     this.statusPanel = requireElement<HTMLElement>('status-panel');
     this.statusPanelMinimizeBtn = requireElement<HTMLButtonElement>('status-panel-minimize');
     this.jointPanel = requireElement<HTMLElement>('joint-panel');
+    this.jointControlStack = requireElement<HTMLDivElement>('joint-control-stack');
     this.jointPanelToggle = requireElement<HTMLButtonElement>('joint-panel-toggle');
     this.jointPanelContent = requireElement<HTMLDivElement>('joint-panel-content');
     this.jointList = requireElement<HTMLDivElement>('joint-list');
@@ -2233,14 +2235,19 @@ export class AppController {
       onDragStateChange: (isDragging) => this.handleDragStateChange(isDragging),
     });
 
-    // Reserve the timeline's actual height, including wrapped playback controls.
+    // Fit the left controls between Datasets and the timeline as either changes size.
     this.motionTimelineResizeObserver = new ResizeObserver(() => {
       this.appRoot.style.setProperty(
         '--motion-timeline-height',
         `${this.motionTimelineSection.getBoundingClientRect().height}px`,
       );
+      this.appRoot.style.setProperty(
+        '--dataset-panel-bottom',
+        `${this.datasetPanel.offsetTop + this.datasetPanel.offsetHeight}px`,
+      );
     });
     this.motionTimelineResizeObserver.observe(this.motionTimelineSection);
+    this.motionTimelineResizeObserver.observe(this.datasetPanel);
 
     window.addEventListener('resize', this.onWindowResize);
     window.addEventListener('keydown', this.onWindowKeyDown);
@@ -9560,11 +9567,15 @@ export class AppController {
       if (jointNames.length > 0) {
         this.renderJointPanel(jointNames, jointValues);
         this.jointPanel.hidden = false;
+        this.jointControlStack.hidden = false;
+        this.appRoot.dataset.hasJointControls = 'true';
       }
     }
   }
 
   private hideJointPanel(): void {
+    this.jointControlStack.hidden = true;
+    this.appRoot.dataset.hasJointControls = 'false';
     this.jointPanel.hidden = true;
     this.jointList.innerHTML = '';
   }

@@ -186,53 +186,6 @@
                 Export
               </button>
             </div>
-            <div class="foot-align-controls">
-              <button id="align-left-foot-btn" type="button" class="toggle-chip">
-                Align Left Foot
-              </button>
-              <button id="align-right-foot-btn" type="button" class="toggle-chip">
-                Align Right Foot
-              </button>
-              <label for="foot-align-smooth-frames">Smooth ±</label>
-              <input
-                id="foot-align-smooth-frames"
-                type="number"
-                min="0"
-                max="200"
-                step="1"
-                value="10"
-              />
-              <span>frames</span>
-            </div>
-            <div class="foot-lock-controls">
-              <span>Foot lock from current frame</span>
-              <select id="foot-lock-side">
-                <option value="left">Left Foot</option>
-                <option value="right">Right Foot</option>
-              </select>
-              <label for="foot-lock-duration">Duration</label>
-              <input
-                id="foot-lock-duration"
-                type="number"
-                min="1"
-                max="10000"
-                step="1"
-                value="30"
-              />
-              <span>frames</span>
-              <label for="foot-lock-blend-frames">Blend out</label>
-              <input
-                id="foot-lock-blend-frames"
-                type="number"
-                min="0"
-                max="200"
-                step="1"
-                value="5"
-              />
-              <button id="apply-foot-lock-btn" type="button" class="toggle-chip">
-                Lock Foot
-              </button>
-            </div>
             <div class="com-adjust-controls">
               <span title="Robot coordinates, in meters">CoM offset (X forward · Y left · Z up)</span>
               <label for="com-offset-x">X</label>
@@ -317,15 +270,75 @@
           </section>
         </div>
       </aside>
-      <aside id="joint-panel" class="joint-panel" hidden>
-        <div class="joint-panel__header">
-          <p class="joint-panel__title">Joint Control</p>
-          <button id="joint-panel-toggle" class="joint-panel__toggle">−</button>
-        </div>
-        <div id="joint-panel-content" class="joint-panel__content">
-          <div id="joint-list" class="joint-list"></div>
-        </div>
-      </aside>
+      <div id="joint-control-stack" class="joint-control-stack" hidden>
+        <details class="foot-control-panel" open>
+          <summary class="foot-control-panel__title">Foot Control</summary>
+          <div class="foot-control-panel__content">
+            <div class="foot-align-controls">
+              <button id="align-left-foot-btn" type="button" class="toggle-chip">
+                Align Left Foot
+              </button>
+              <button id="align-right-foot-btn" type="button" class="toggle-chip">
+                Align Right Foot
+              </button>
+              <label for="foot-align-smooth-frames">Smooth ±</label>
+              <input
+                id="foot-align-smooth-frames"
+                type="number"
+                min="0"
+                max="200"
+                step="1"
+                value="10"
+              />
+              <span>frames</span>
+            </div>
+            <div class="foot-lock-controls">
+              <span>Foot lock from current frame</span>
+              <div class="foot-control-panel__row">
+                <select id="foot-lock-side" aria-label="Foot to lock">
+                  <option value="left">Left Foot</option>
+                  <option value="right">Right Foot</option>
+                </select>
+              </div>
+              <div class="foot-control-panel__row">
+                <label for="foot-lock-duration">Duration</label>
+                <input
+                  id="foot-lock-duration"
+                  type="number"
+                  min="1"
+                  max="10000"
+                  step="1"
+                  value="30"
+                />
+                <span>frames</span>
+              </div>
+              <div class="foot-control-panel__row">
+                <label for="foot-lock-blend-frames">Blend out</label>
+                <input
+                  id="foot-lock-blend-frames"
+                  type="number"
+                  min="0"
+                  max="200"
+                  step="1"
+                  value="5"
+                />
+                <button id="apply-foot-lock-btn" type="button" class="toggle-chip">
+                  Lock Foot
+                </button>
+              </div>
+            </div>
+          </div>
+        </details>
+        <aside id="joint-panel" class="joint-panel" hidden>
+          <div class="joint-panel__header">
+            <p class="joint-panel__title">Joint Control</p>
+            <button id="joint-panel-toggle" class="joint-panel__toggle">−</button>
+          </div>
+          <div id="joint-panel-content" class="joint-panel__content">
+            <div id="joint-list" class="joint-list"></div>
+          </div>
+        </aside>
+      </div>
     </div>
 
     <section
