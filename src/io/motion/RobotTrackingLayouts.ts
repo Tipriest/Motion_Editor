@@ -1,5 +1,45 @@
 export type RobotTrackingLayoutId = 'tiangong3' | 'dex-evt';
 
+// Tiangong3 policy motions omit the two actuated head joints from the URDF.
+export const TIANGONG3_JOINT_NAMES_29 = [
+  'hip_pitch_l_joint',
+  'hip_roll_l_joint',
+  'hip_yaw_l_joint',
+  'knee_pitch_l_joint',
+  'ankle_pitch_l_joint',
+  'ankle_roll_l_joint',
+  'hip_pitch_r_joint',
+  'hip_roll_r_joint',
+  'hip_yaw_r_joint',
+  'knee_pitch_r_joint',
+  'ankle_pitch_r_joint',
+  'ankle_roll_r_joint',
+  'waist_yaw_joint',
+  'waist_roll_joint',
+  'waist_pitch_joint',
+  'shoulder_pitch_l_joint',
+  'shoulder_roll_l_joint',
+  'shoulder_yaw_l_joint',
+  'elbow_pitch_l_joint',
+  'elbow_yaw_l_joint',
+  'wrist_pitch_l_joint',
+  'wrist_roll_l_joint',
+  'shoulder_pitch_r_joint',
+  'shoulder_roll_r_joint',
+  'shoulder_yaw_r_joint',
+  'elbow_pitch_r_joint',
+  'elbow_yaw_r_joint',
+  'wrist_pitch_r_joint',
+  'wrist_roll_r_joint',
+] as const;
+
+export const TIANGONG3_JOINT_NAMES_31 = [
+  ...TIANGONG3_JOINT_NAMES_29.slice(0, 15),
+  'head_yaw_joint',
+  'head_pitch_joint',
+  ...TIANGONG3_JOINT_NAMES_29.slice(15),
+] as const;
+
 export const DEX_EVT_JOINT_NAMES_29 = [
   'hip_pitch_l_joint',
   'hip_pitch_r_joint',

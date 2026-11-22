@@ -5,6 +5,10 @@ import {
   parsePickleNdarrayFloat64,
   parsePythonPickleBuffer,
 } from './PythonPickleIO';
+import {
+  TIANGONG3_JOINT_NAMES_29,
+  TIANGONG3_JOINT_NAMES_31,
+} from './RobotTrackingLayouts';
 import { pickle } from 'picklefriend';
 
 interface ParsedGmrMotionPayload {
@@ -228,24 +232,132 @@ async function parseGmrMotionPayload(
   };
 }
 
-function cloneMotionSchema(motionSchema: MotionSchema, linkBodyList: string[]): MotionSchema {
+function cloneMotionSchema(motionSchema: MotionSchema, jointNames: readonly string[]): MotionSchema {
   return {
     rootJointName: motionSchema.rootJointName,
     rootComponentCount: DEFAULT_ROOT_COMPONENT_COUNT,
-    jointNames: linkBodyList.length > 0 ? [...linkBodyList] : [...motionSchema.jointNames],
+    jointNames: [...jointNames],
   };
+}
+
+interface GmrJointMapping {
+  sourceIndices: number[];
+  outputJointNames: string[];
+  warning: string | null;
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function hasUniqueJointNames(names: readonly string[], expectedCount: number): boolean {
+  return (
+    names.length === expectedCount &&
+    names.every((name) => name.length > 0) &&
+    new Set(names).size === names.length
+  );
+}
+
+function resolveGmrJointMapping(
+  payload: ParsedGmrMotionPayload,
+  motionSchema: MotionSchema,
+): GmrJointMapping {
+  const targetNames = motionSchema.jointNames;
+  const expectedJointCount = targetNames.length;
+  const hasNamedSource = hasUniqueJointNames(payload.linkBodyList, payload.jointCount);
+
+  if (payload.jointCount === expectedJointCount) {
+    if (hasNamedSource) {
+      const sourceIndexByName = new Map(
+        payload.linkBodyList.map((jointName, index) => [jointName, index]),
+      );
+      const namedIndices = targetNames.map((jointName) => sourceIndexByName.get(jointName) ?? -1);
+      if (namedIndices.every((index) => index >= 0)) {
+        const reordered = namedIndices.some((sourceIndex, index) => sourceIndex !== index);
+        return {
+          sourceIndices: namedIndices,
+          outputJointNames: [...targetNames],
+          warning: reordered
+            ? 'Reordered GMR joints by link_body_list to match the active URDF.'
+            : null,
+        };
+      }
+    }
+
+    return {
+      sourceIndices: Array.from({ length: expectedJointCount }, (_, index) => index),
+      outputJointNames: hasNamedSource ? [...payload.linkBodyList] : [...targetNames],
+      warning: null,
+    };
+  }
+
+  const targetIsTiangong29 = arraysEqual(targetNames, TIANGONG3_JOINT_NAMES_29);
+  const targetIsTiangong31 = arraysEqual(targetNames, TIANGONG3_JOINT_NAMES_31);
+  let sourceNames: readonly string[] | null = hasNamedSource ? payload.linkBodyList : null;
+  let inferredSourceLayout = false;
+
+  if (!sourceNames && targetIsTiangong31 && payload.jointCount === 29) {
+    sourceNames = TIANGONG3_JOINT_NAMES_29;
+    inferredSourceLayout = true;
+  } else if (!sourceNames && targetIsTiangong29 && payload.jointCount === 31) {
+    sourceNames = TIANGONG3_JOINT_NAMES_31;
+    inferredSourceLayout = true;
+  }
+
+  if (!sourceNames) {
+    throw new Error(
+      `GMR motion "${payload.sourcePath}" has ${payload.jointCount} joints, expected ${expectedJointCount} for the active URDF.`,
+    );
+  }
+
+  const sourceIndexByName = new Map(sourceNames.map((jointName, index) => [jointName, index]));
+  const sourceIndices = targetNames.map((jointName) => sourceIndexByName.get(jointName) ?? -1);
+  const missingTargetNames = targetNames.filter((_, index) => sourceIndices[index] < 0);
+  const missingOnlyTiangongHead =
+    targetIsTiangong31 &&
+    missingTargetNames.length === 2 &&
+    missingTargetNames.includes('head_yaw_joint') &&
+    missingTargetNames.includes('head_pitch_joint');
+
+  if (missingTargetNames.length > 0 && !missingOnlyTiangongHead) {
+    throw new Error(
+      `GMR motion "${payload.sourcePath}" cannot map to the active URDF; missing joints: ${missingTargetNames.join(', ')}.`,
+    );
+  }
+
+  let warning: string;
+  if (missingOnlyTiangongHead) {
+    warning =
+      'Mapped Tiangong3 29-DOF GMR motion to the 31-joint URDF; head_yaw_joint and head_pitch_joint were set to 0.';
+  } else {
+    const droppedCount = sourceNames.length - targetNames.length;
+    warning =
+      droppedCount > 0
+        ? `Mapped GMR joints by name to the active URDF and ignored ${droppedCount} extra joint${droppedCount === 1 ? '' : 's'}.`
+        : 'Mapped GMR joints by name to the active URDF.';
+  }
+  if (inferredSourceLayout) {
+    warning += ' Source order was inferred from the standard Tiangong3 layout.';
+  }
+
+  return {
+    sourceIndices,
+    outputJointNames: [...targetNames],
+    warning,
+  };
+}
+
+interface BuiltGmrMotionClip {
+  clip: MotionClip;
+  warnings: string[];
 }
 
 function buildMotionClip(
   payload: ParsedGmrMotionPayload,
   motionSchema: MotionSchema,
-): MotionClip {
+): BuiltGmrMotionClip {
   const expectedJointCount = motionSchema.jointNames.length;
-  if (payload.jointCount !== expectedJointCount) {
-    throw new Error(
-      `GMR motion "${payload.sourcePath}" has ${payload.jointCount} joints, expected ${expectedJointCount} for the active URDF.`,
-    );
-  }
+  const mapping = resolveGmrJointMapping(payload, motionSchema);
 
   const stride = DEFAULT_ROOT_COMPONENT_COUNT + expectedJointCount;
   const data = new Float32Array(payload.frameCount * stride);
@@ -287,21 +399,25 @@ function buildMotionClip(
     data[targetBase + 6] = qw;
 
     for (let jointIndex = 0; jointIndex < expectedJointCount; jointIndex += 1) {
+      const sourceJointIndex = mapping.sourceIndices[jointIndex];
       data[targetBase + DEFAULT_ROOT_COMPONENT_COUNT + jointIndex] =
-        payload.dofPos[dofPosBase + jointIndex] ?? 0;
+        sourceJointIndex >= 0 ? (payload.dofPos[dofPosBase + sourceJointIndex] ?? 0) : 0;
     }
   }
 
   return {
-    name: payload.name,
-    sourcePath: payload.sourcePath,
-    fps: payload.fps,
-    frameCount: payload.frameCount,
-    stride,
-    schema: cloneMotionSchema(motionSchema, payload.linkBodyList),
-    csvMode: 'ordered',
-    sourceColumnCount: DEFAULT_ROOT_COMPONENT_COUNT + payload.jointCount,
-    data,
+    clip: {
+      name: payload.name,
+      sourcePath: payload.sourcePath,
+      fps: payload.fps,
+      frameCount: payload.frameCount,
+      stride,
+      schema: cloneMotionSchema(motionSchema, mapping.outputJointNames),
+      csvMode: 'ordered',
+      sourceColumnCount: DEFAULT_ROOT_COMPONENT_COUNT + payload.jointCount,
+      data,
+    },
+    warnings: mapping.warning ? [mapping.warning] : [],
   };
 }
 
@@ -345,13 +461,16 @@ export class GmrMotionService {
       }
 
       const payload = await loadPath(selectedPath);
-      const clip = buildMotionClip(payload, motionSchema);
+      const built = buildMotionClip(payload, motionSchema);
       for (const warning of payload.warnings) {
+        warnings.add(warning);
+      }
+      for (const warning of built.warnings) {
         warnings.add(warning);
       }
 
       return {
-        clip,
+        clip: built.clip,
         selectedMotionPath: selectedPath,
         warnings: [...warnings],
       };
@@ -368,7 +487,9 @@ export class GmrMotionService {
         const payload = await loadPath(path);
         discoveredJointCounts.add(payload.jointCount);
 
-        if (payload.jointCount !== expectedJointCount) {
+        try {
+          resolveGmrJointMapping(payload, motionSchema);
+        } catch {
           continue;
         }
 
@@ -400,6 +521,10 @@ export class GmrMotionService {
     for (const warning of selectedPayload.warnings) {
       warnings.add(warning);
     }
+    const built = buildMotionClip(selectedPayload, motionSchema);
+    for (const warning of built.warnings) {
+      warnings.add(warning);
+    }
 
     if (pklPaths.length > 1) {
       if (selectedPath === pklPaths[0]) {
@@ -414,7 +539,7 @@ export class GmrMotionService {
     }
 
     return {
-      clip: buildMotionClip(selectedPayload, motionSchema),
+      clip: built.clip,
       selectedMotionPath: selectedPath,
       warnings: [...warnings],
     };

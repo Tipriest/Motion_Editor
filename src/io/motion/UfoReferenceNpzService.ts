@@ -4,40 +4,11 @@ import { writeFloat32Npz } from './NpzWriter';
 import {
   DEX_EVT_BODY_NAMES_39,
   DEX_EVT_JOINT_NAMES_29,
+  TIANGONG3_JOINT_NAMES_29,
   type RobotTrackingLayoutId,
 } from './RobotTrackingLayouts';
 
-export const UFO_POLICY_JOINT_NAMES = [
-  'hip_pitch_l_joint',
-  'hip_roll_l_joint',
-  'hip_yaw_l_joint',
-  'knee_pitch_l_joint',
-  'ankle_pitch_l_joint',
-  'ankle_roll_l_joint',
-  'hip_pitch_r_joint',
-  'hip_roll_r_joint',
-  'hip_yaw_r_joint',
-  'knee_pitch_r_joint',
-  'ankle_pitch_r_joint',
-  'ankle_roll_r_joint',
-  'waist_yaw_joint',
-  'waist_roll_joint',
-  'waist_pitch_joint',
-  'shoulder_pitch_l_joint',
-  'shoulder_roll_l_joint',
-  'shoulder_yaw_l_joint',
-  'elbow_pitch_l_joint',
-  'elbow_yaw_l_joint',
-  'wrist_pitch_l_joint',
-  'wrist_roll_l_joint',
-  'shoulder_pitch_r_joint',
-  'shoulder_roll_r_joint',
-  'shoulder_yaw_r_joint',
-  'elbow_pitch_r_joint',
-  'elbow_yaw_r_joint',
-  'wrist_pitch_r_joint',
-  'wrist_roll_r_joint',
-] as const;
+export const UFO_POLICY_JOINT_NAMES = TIANGONG3_JOINT_NAMES_29;
 
 export const UFO_POLICY_BODY_NAMES = [
   'pelvis',
