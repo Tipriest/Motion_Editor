@@ -5596,6 +5596,7 @@ export class AppController {
       });
     } finally {
       this.isPresetLoading = false;
+      this.renderUrdfList();
       this.syncPresetControls();
     }
   }
