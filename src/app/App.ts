@@ -1005,6 +1005,7 @@ export class AppController {
   private readonly modePropsList: HTMLDivElement;
   private readonly motionControlsSection: HTMLElement;
   private readonly motionTimelineSection: HTMLElement;
+  private readonly motionTimelineResizeObserver: ResizeObserver;
   private readonly motionPlayButton: HTMLButtonElement;
   private readonly motionResetButton: HTMLButtonElement;
   private readonly motionFpsControl: HTMLDivElement;
@@ -2194,6 +2195,15 @@ export class AppController {
       onDragStateChange: (isDragging) => this.handleDragStateChange(isDragging),
     });
 
+    // Reserve the timeline's actual height, including wrapped playback controls.
+    this.motionTimelineResizeObserver = new ResizeObserver(() => {
+      this.appRoot.style.setProperty(
+        '--motion-timeline-height',
+        `${this.motionTimelineSection.getBoundingClientRect().height}px`,
+      );
+    });
+    this.motionTimelineResizeObserver.observe(this.motionTimelineSection);
+
     window.addEventListener('resize', this.onWindowResize);
     window.addEventListener('keydown', this.onWindowKeyDown);
     this.folderInput.addEventListener('change', this.onFolderInputChange);
@@ -2299,6 +2309,7 @@ export class AppController {
 
   dispose(): void {
     this.clearRecoverReadyTimer();
+    this.motionTimelineResizeObserver.disconnect();
     this.removeDropHandlers();
     window.removeEventListener('resize', this.onWindowResize);
     window.removeEventListener('keydown', this.onWindowKeyDown);

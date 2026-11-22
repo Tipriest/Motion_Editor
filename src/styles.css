@@ -1439,11 +1439,13 @@ body {
 }
 
 .joint-panel {
+  --joint-panel-top: calc(50vh + 1.5rem);
   position: absolute;
-  top: calc(50vh + 1.5rem);
+  top: var(--joint-panel-top);
   left: 1rem;
   width: min(280px, calc(100vw - 2rem));
-  max-height: calc(50vh - 2.5rem);
+  /* Keep the scrollable panel above the timeline at every viewport size. */
+  max-height: calc(100% - var(--joint-panel-top) - var(--motion-timeline-height, 0px) - 1rem);
   overflow-x: hidden;
   overflow-y: auto;
   background: rgba(6, 12, 17, 0.72);
@@ -1453,13 +1455,12 @@ body {
   box-shadow: 0 12px 24px rgba(1, 7, 10, 0.33);
   backdrop-filter: blur(8px) saturate(120%);
   z-index: 1;
-  transition: top 0.3s ease, max-height 0.3s ease;
+  transition: top 0.3s ease;
 }
 
 /* When dataset panel is minimized, adjust joint panel position and height */
 #dataset-panel[data-minimized="true"] + #status-panel + #joint-panel {
-  top: 4rem;
-  max-height: calc(100vh - 5rem);
+  --joint-panel-top: 4rem;
 }
 
 .joint-panel::-webkit-scrollbar {
@@ -1840,10 +1841,10 @@ body {
 
   .joint-panel {
     top: auto;
-    bottom: 0.65rem;
+    bottom: calc(var(--motion-timeline-height, 0px) + 0.65rem);
     right: 0.65rem;
     left: auto;
     width: calc(100vw - 1.3rem);
-    max-height: 50vh;
+    max-height: min(50vh, calc(100% - var(--motion-timeline-height, 0px) - 1.3rem));
   }
 }
