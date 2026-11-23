@@ -200,6 +200,8 @@ BVH 自带 ROOT/JOINT 层级、OFFSET、CHANNELS 与动作帧，不需要独立 
 
 下列列表都按 **0 开始索引**。机器学习张量应严格按列表顺序写列；关节顺序不能依据机器人外观、文件名或“都是 29 DOF”推断。
 
+这些表定义本应用支持的协议约定，不证明任何未携带名称、来源不明的数组实际符合约定。尤其 UFO NPZ 当前根据 body 数量选择固定布局，再给关节列赋名；这一步没有从数值中识别真实关节，也没有与源文件名称元数据核验。外部数据应先由生成代码或索引映射确认来源顺序。
+
 来源：[RobotTrackingLayouts.ts](../src/io/motion/RobotTrackingLayouts.ts)、[UfoReferenceNpzService.ts](../src/io/motion/UfoReferenceNpzService.ts)。
 
 ### 6.1 Tiangong3 29 关节与 31 关节

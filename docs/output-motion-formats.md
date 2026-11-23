@@ -143,6 +143,8 @@ ZIP 内包含四个同名 `.npy`，不带 `joint_names`、`body_names`、速度�
 - DEX_MOSAIC：B=39，关节/刚体按 DEX EVT 固定表。**29 列的顺序也不同**，不是只多了 9 个 body。
 - 输出无名称数组；必须携带或引用[固定索引表](model-formats.md#joint-layouts)。
 
+上述顺序是本应用导出器的明确写出约定。一个外部 NPZ 即使具有相同字段与形状，也不能由此确认采用同一顺序；导入器按约定赋名不是自动识别或语义验证。若源动作导入时已使用错误的顺序假设，重新导出也不会自动纠正该错误。
+
 ### 坐标与采样
 
 `body_*_w` 来自当前 URDF 的逐帧前向运动学。导出时计算 `inverse(robot.parent.matrixWorld) * link.matrixWorld`，去掉 viewer 外层 model-root 的显示变换，再分解位置与旋转。因此文件中的“world”是模型原始运动坐标系，不是截图里的 Three.js 显示坐标。
