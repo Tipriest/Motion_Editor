@@ -35,6 +35,59 @@ function createFileMap(...files: File[]): DroppedFileMap {
   return new Map(files.map((file) => [file.name, file]));
 }
 
+describe('GMR field diagnostics', () => {
+  const payload = () => ({
+    fps: 50,
+    root_pos: [[1, 2, 3]],
+    root_rot: [[0, 0, 0, 1]],
+    dof_pos: [[0.25]],
+    link_body_list: ['knee'],
+  });
+  const load = (value: object) => {
+    const file = new File([pickle.dumps(value)], 'motion.pkl');
+    return new GmrMotionService().loadFromDroppedFiles(createFileMap(file), createSchema(['knee']), file.name);
+  };
+
+  it('lists all missing required fields together', async () => {
+    await expect(load({ root_pos: [[1, 2, 3]] })).rejects.toThrow(
+      'GMR PKL is missing "fps", "root_rot", "dof_pos".',
+    );
+  });
+
+  it('reports field names, expected dimensions, and actual dimensions', async () => {
+    await expect(load({ ...payload(), root_pos: [[1, 2]] })).rejects.toThrow(
+      /root_pos.*\[frameCount, 3\].*\[1, 2\]/,
+    );
+    await expect(load({ ...payload(), root_rot: [[0, 0, 1]] })).rejects.toThrow(
+      /root_rot.*\[frameCount, 4\].*\[1, 3\]/,
+    );
+    await expect(load({ ...payload(), dof_pos: [[0.25], [0.5]] })).rejects.toThrow(
+      /frame count mismatch: root_pos=1, root_rot=1, dof_pos=2/,
+    );
+  });
+
+  it('keeps successful imports while reporting defaults, repairs, and unverifiable joint order', async () => {
+    const result = await load({ ...payload(), fps: -1, root_rot: [[0, 0, 0, 0]], link_body_list: null });
+    expect(result.clip.frameCount).toBe(1);
+    expect(Array.from(result.clip.data.slice(3, 7))).toEqual([0, 0, 0, 1]);
+    const warnings = result.warnings.join(' ');
+    expect(warnings).toMatch(/invalid fps; defaulted/);
+    expect(warnings).toMatch(/link_body_list/);
+    expect(warnings).toMatch(/joint order could not be verified/);
+    expect(warnings).toMatch(/root_rot.*zero-length.*frame 1.*identity/);
+  });
+
+  it('warns when named source joints do not match the active URDF', async () => {
+    const result = await load({ ...payload(), link_body_list: ['other_joint'] });
+    expect(result.warnings.join(' ')).toContain('does not match the active URDF');
+    expect(result.clip.schema.jointNames).toEqual(['other_joint']);
+  });
+
+  it('does not add field warnings for a complete, compatible motion', async () => {
+    expect((await load(payload())).warnings).toEqual([]);
+  });
+});
+
 describe('GmrMotionService Tiangong3 joint layouts', () => {
   it('maps an unnamed 29-DOF motion onto the 31-joint URDF and zeros the head', async () => {
     const service = new GmrMotionService();

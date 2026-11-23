@@ -148,17 +148,10 @@ async function parseGmrMotionPayload(
     throw new Error('GMR PKL root object must be a dictionary.');
   }
 
-  if (parsed.fps === undefined) {
-    throw new Error('GMR PKL is missing "fps".');
-  }
-  if (parsed.root_pos === undefined) {
-    throw new Error('GMR PKL is missing "root_pos".');
-  }
-  if (parsed.root_rot === undefined) {
-    throw new Error('GMR PKL is missing "root_rot".');
-  }
-  if (parsed.dof_pos === undefined) {
-    throw new Error('GMR PKL is missing "dof_pos".');
+  const missingFields = ['fps', 'root_pos', 'root_rot', 'dof_pos']
+    .filter((field) => parsed[field] === undefined);
+  if (missingFields.length > 0) {
+    throw new Error(`GMR PKL is missing ${missingFields.map((field) => `"${field}"`).join(', ')}.`);
   }
 
   const warnings: string[] = [];
@@ -287,7 +280,9 @@ function resolveGmrJointMapping(
     return {
       sourceIndices: Array.from({ length: expectedJointCount }, (_, index) => index),
       outputJointNames: hasNamedSource ? [...payload.linkBodyList] : [...targetNames],
-      warning: null,
+      warning: hasNamedSource
+        ? 'GMR link_body_list does not match the active URDF joint names. Check the model and joint mapping.'
+        : 'GMR joint order could not be verified from link_body_list; using the active URDF column order. Verify the source joint order.',
     };
   }
 
@@ -361,6 +356,8 @@ function buildMotionClip(
 
   const stride = DEFAULT_ROOT_COMPONENT_COUNT + expectedJointCount;
   const data = new Float32Array(payload.frameCount * stride);
+  let repairedQuaternionCount = 0;
+  let firstRepairedFrame = -1;
 
   for (let frameIndex = 0; frameIndex < payload.frameCount; frameIndex += 1) {
     const targetBase = frameIndex * stride;
@@ -379,6 +376,8 @@ function buildMotionClip(
 
     const qLen = Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
     if (qLen < 1e-10) {
+      repairedQuaternionCount += 1;
+      if (firstRepairedFrame < 0) firstRepairedFrame = frameIndex;
       qx = 0;
       qy = 0;
       qz = 0;
@@ -418,7 +417,12 @@ function buildMotionClip(
       sourceJointCount: payload.jointCount,
       data,
     },
-    warnings: mapping.warning ? [mapping.warning] : [],
+    warnings: [
+      ...(mapping.warning ? [mapping.warning] : []),
+      ...(repairedQuaternionCount > 0 ? [
+        `GMR root_rot has ${repairedQuaternionCount} zero-length quaternion(s), first at frame ${firstRepairedFrame + 1}; replaced with identity rotation.`,
+      ] : []),
+    ],
   };
 }
 

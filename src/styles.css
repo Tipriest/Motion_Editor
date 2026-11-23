@@ -1109,6 +1109,46 @@ body {
   background: rgba(1, 7, 10, 0.72);
 }
 
+.import-check-btn {
+  max-width: 240px;
+  white-space: normal;
+}
+
+.import-check-btn[data-status='success'] {
+  color: #d4ffe4;
+  background: #174d35;
+  border-color: #55d692;
+}
+
+.import-check-btn[data-status='error'] {
+  color: #ffe3e3;
+  background: #762b35;
+  border-color: #ff8792;
+}
+
+.import-check-dialog {
+  background: #162b3c;
+}
+
+.import-check-dialog__note {
+  line-height: 1.6;
+  color: #bdd0dd;
+}
+
+.import-check-dialog__issues {
+  padding-left: 1.4rem;
+  line-height: 1.7;
+}
+
+.import-check-dialog__issues li,
+.import-check-dialog dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.import-check-dialog__issues li[data-severity='warning'] { color: #ffda91; }
+.import-check-dialog__issues li[data-severity='error'] { color: #ffadb5; }
+
 .motion-info-dialog__header {
   display: flex;
   align-items: center;

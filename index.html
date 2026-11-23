@@ -107,6 +107,15 @@
 
       <div class="status-panel-group">
         <button
+          id="import-check-btn"
+          type="button"
+          class="toggle-chip import-check-btn"
+          data-status="idle"
+          aria-haspopup="dialog"
+          aria-controls="import-check-dialog"
+          disabled
+        >数据检查</button>
+        <button
           id="format-supported-btn"
           type="button"
           class="toggle-chip"
@@ -456,6 +465,17 @@
         </button>
       </div>
     </section>
+
+    <dialog id="import-check-dialog" class="motion-info-dialog import-check-dialog" aria-labelledby="import-check-title">
+      <div class="motion-info-dialog__header">
+        <h2 id="import-check-title">数据字段检查</h2>
+        <button id="import-check-close-btn" type="button" class="toggle-chip" autofocus>关闭</button>
+      </div>
+      <p id="import-check-summary" role="status"></p>
+      <p class="import-check-dialog__note">检查依据为本次导入的解析器提示与解析后的当前场景数据；自动补值、默认值和映射情况会列为提示。</p>
+      <ul id="import-check-issues" class="import-check-dialog__issues" hidden></ul>
+      <dl id="import-check-details" class="motion-info-dialog__details"></dl>
+    </dialog>
 
     <dialog id="motion-info-dialog" class="motion-info-dialog" aria-labelledby="motion-info-title">
       <div class="motion-info-dialog__header">

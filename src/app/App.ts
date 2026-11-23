@@ -85,6 +85,8 @@ import {
 } from './MotionFormatModes';
 import { getStateCopy } from './state';
 import { buildMotionInfoRows, type MotionInfo } from './MotionInfo';
+import { inspectMotionData, type ImportSummary } from './ImportDiagnostics';
+import { ImportDiagnosticsPanel } from './ImportDiagnosticsPanel';
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -1019,6 +1021,7 @@ export class AppController {
   private readonly motionControlsSection: HTMLElement;
   private readonly motionTimelineSection: HTMLElement;
   private readonly motionTimelineResizeObserver: ResizeObserver;
+  private readonly importDiagnosticsPanel: ImportDiagnosticsPanel;
   private readonly motionInfoButton: HTMLButtonElement;
   private readonly motionInfoDialog: HTMLDialogElement;
   private readonly motionInfoCloseButton: HTMLButtonElement;
@@ -1191,7 +1194,7 @@ export class AppController {
   };
 
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
-    if (this.motionInfoDialog.open || this.formatSupportedDialog.open) {
+    if (this.importDiagnosticsPanel.isOpen || this.motionInfoDialog.open || this.formatSupportedDialog.open) {
       return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.repeat) {
@@ -2049,6 +2052,7 @@ export class AppController {
 
   constructor() {
     this.appRoot = requireElement<HTMLDivElement>('app');
+    this.importDiagnosticsPanel = new ImportDiagnosticsPanel();
     const canvas = requireElement<HTMLCanvasElement>('viewer-canvas');
     this.dropHint = requireElement<HTMLParagraphElement>('drop-hint');
     this.dropOverlayDockButton = requireElement<HTMLButtonElement>('drop-overlay-dock-btn');
@@ -2349,6 +2353,10 @@ export class AppController {
   }
 
   async handleDrop(dataTransfer: DataTransfer): Promise<void> {
+    await this.runImportCheck('拖放文件', () => this.performDrop(dataTransfer));
+  }
+
+  private async performDrop(dataTransfer: DataTransfer): Promise<void> {
     try {
       const fileMap = await dataTransferToFileMap(dataTransfer);
       await this.handleDroppedFileMap(fileMap);
@@ -2362,6 +2370,7 @@ export class AppController {
   }
 
   resetViewer(): void {
+    this.importDiagnosticsPanel.diagnostics.reset();
     this.isDropOverlayDocked = false;
     this.syncDropOverlayDockState();
     this.droppedFileMap = null;
@@ -2392,6 +2401,7 @@ export class AppController {
   }
 
   dispose(): void {
+    this.importDiagnosticsPanel.dispose();
     this.clearRecoverReadyTimer();
     this.motionInfoDialog.close();
     this.motionInfoButton.removeEventListener('click', this.onMotionInfoClick);
@@ -2452,6 +2462,11 @@ export class AppController {
   }
 
   private async handlePickedFiles(fileList: FileList | null): Promise<void> {
+    if (!fileList?.length) return;
+    await this.runImportCheck('选择文件', () => this.performPickedFiles(fileList));
+  }
+
+  private async performPickedFiles(fileList: FileList | null): Promise<void> {
     if (!fileList || fileList.length === 0) {
       return;
     }
@@ -2461,6 +2476,10 @@ export class AppController {
   }
 
   private async handleDroppedFileMap(fileMap: DroppedFileMap): Promise<void> {
+    const paths = [...fileMap.keys()];
+    this.importDiagnosticsPanel.diagnostics.setSource(
+      paths.slice(0, 30).join('\n') + (paths.length > 30 ? `\n… 共 ${paths.length} 个文件` : ''),
+    );
     if (fileMap.size === 0) {
       this.setState('error', {
         title: 'No Files Found',
@@ -2574,6 +2593,7 @@ export class AppController {
 
     // Try to load as either MimicKit or GMR PKL
     const mimicKitPklPaths = [...this.mimicKitMotionService.getAvailablePklPaths(fileMap)];
+    const pklErrors: string[] = [];
     if (mimicKitPklPaths.length > 0) {
       const loadedRobotResult = this.lastLoadResult;
       if (!loadedRobotResult) {
@@ -2597,6 +2617,7 @@ export class AppController {
           );
           return;
         } catch (ufoTrainingError) {
+          pklErrors.push(`${path} · UFO Training: ${ufoTrainingError instanceof Error ? ufoTrainingError.message : String(ufoTrainingError)}`);
           console.log(
             `Failed to load ${path} as UFO Training, trying MimicKit:`,
             ufoTrainingError,
@@ -2619,6 +2640,7 @@ export class AppController {
             );
             return;
           } catch (mimicKitError) {
+            pklErrors.push(`${path} · MimicKit: ${mimicKitError instanceof Error ? mimicKitError.message : String(mimicKitError)}`);
             console.log(`Failed to load ${path} as MimicKit, trying GMR:`, mimicKitError);
             try {
               this.setState('loading', {
@@ -2638,18 +2660,13 @@ export class AppController {
               );
               return;
             } catch (gmrError) {
+              pklErrors.push(`${path} · GMR: ${gmrError instanceof Error ? gmrError.message : String(gmrError)}`);
               console.log(`Failed to load ${path} as GMR either:`, gmrError);
               // Continue with the next PKL.
             }
           }
         }
       }
-
-      // 所有文件都尝试失败
-      this.setState('error', {
-        title: 'Motion Load Failed',
-        detail: 'Failed to load any .pkl file as UFO Training, MimicKit, or GMR format.',
-      });
     }
 
     const smplScan = await this.smplMotionService.scanDroppedNpzFiles(fileMap);
@@ -2710,6 +2727,15 @@ export class AppController {
         return;
       }
       await this.loadObjModelFromDroppedFiles(fileMap);
+      return;
+    }
+
+    if (pklErrors.length > 0) {
+      this.showRecoverableDropError(
+        'Motion Load Failed',
+        pklErrors.join('\n'),
+        'Check the missing fields, array shapes, and active URDF joint layout listed above.',
+      );
       return;
     }
 
@@ -2779,6 +2805,10 @@ export class AppController {
   }
 
   private async loadSelectedSmplModel(smplModelPath: string): Promise<void> {
+    await this.runImportCheck(smplModelPath, () => this.performLoadSelectedSmplModel(smplModelPath));
+  }
+
+  private async performLoadSelectedSmplModel(smplModelPath: string): Promise<void> {
     const normalizedModelPath = normalizePath(smplModelPath);
     if (!normalizedModelPath) {
       this.setState('error', {
@@ -2840,6 +2870,11 @@ export class AppController {
     this.currentMotionKind = motionKind;
     this.currentMotionSourcePath = sourcePath;
     this.motionWarnings = [...warnings];
+    if (bindingReport.missingRequiredJoints.length > 0) {
+      this.motionWarnings.push(
+        `Motion joints not found in the active URDF: ${bindingReport.missingRequiredJoints.join(', ')}. Verify the joint names and model.`,
+      );
+    }
     if (bindingReport.missingRootJoint) {
       this.motionWarnings.push(
         `Joint "${clip.schema.rootJointName}" was not found. Root translation/rotation is ignored.`,
@@ -3691,6 +3726,10 @@ export class AppController {
   }
 
   private async loadModelOptionByKey(modelKey: string): Promise<void> {
+    await this.runImportCheck(modelKey, () => this.performLoadModelOptionByKey(modelKey));
+  }
+
+  private async performLoadModelOptionByKey(modelKey: string): Promise<void> {
     const modelOption =
       this.getAvailableModelOptions().find((option) => option.key === modelKey) ?? null;
     if (!modelOption) {
@@ -3779,6 +3818,10 @@ export class AppController {
   }
 
   private async loadMotionOptionByKey(motionKey: string): Promise<void> {
+    await this.runImportCheck(motionKey, () => this.performLoadMotionOptionByKey(motionKey));
+  }
+
+  private async performLoadMotionOptionByKey(motionKey: string): Promise<void> {
     const modelOption = this.getCurrentModelOption();
     if (!modelOption) {
       this.setState('error', {
@@ -4354,6 +4397,7 @@ export class AppController {
       this.clearRecoverReadyTimer();
     }
 
+    this.importDiagnosticsPanel.diagnostics.observeState(state, overrides);
     this.viewerState = state;
     this.titleOverride = this.isModelActiveState() ? null : (overrides.title ?? null);
     this.modelTitleOverride = overrides.modelTitle ?? null;
@@ -5183,16 +5227,47 @@ export class AppController {
       : 'CoM adjustment requires an editable URDF motion with resolved foot geometry.';
   }
 
-  private syncMotionInfo(): void {
-    if (!this.hasAnyMotion()) {
-      this.motionInfoDialog.close();
-      this.motionInfoDetails.replaceChildren();
-      this.motionInfoWarnings.replaceChildren();
-      this.motionInfoSignature = '';
-      return;
-    }
-    if (!this.motionInfoDialog.open) return;
+  private async runImportCheck(source: string, action: () => Promise<void>): Promise<void> {
+    await this.importDiagnosticsPanel.diagnostics.run(source, async () => {
+      try {
+        await action();
+      } catch (error) {
+        this.setState('error', {
+          title: 'Import Failed',
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, () => this.buildImportSummary());
+  }
 
+  private buildImportSummary(): ImportSummary {
+    const rows: Array<[string, string]> = [];
+    const warnings = [...this.warnings, ...this.motionWarnings];
+    const info = this.getCurrentMotionInfo();
+    if (info) rows.push(...buildMotionInfoRows(info));
+    if (this.lastLoadResult) {
+      rows.push(
+        ['URDF model', this.lastLoadResult.selectedUrdfPath],
+        ['Model joints / links', `${this.lastLoadResult.jointCount} / ${this.lastLoadResult.linkCount}`],
+      );
+      warnings.push(...this.lastLoadResult.warnings);
+    }
+    if (this.currentSmplModel) {
+      rows.push(
+        ['SMPL model', this.currentSmplModel.modelSourcePath],
+        ['Model joints / vertices', `${this.currentSmplModel.jointCount} / ${this.currentSmplModel.vertexCount}`],
+      );
+    }
+    if (this.currentObjModel) rows.push(['OBJ model', this.currentObjModel.modelSourcePath]);
+    if (isUrdfMotionKind(this.currentMotionKind) && this.currentMotionClip) {
+      const inspected = inspectMotionData(this.currentMotionClip);
+      rows.push(...inspected.rows);
+      warnings.push(...inspected.warnings);
+    }
+    return { rows, warnings };
+  }
+
+  private getCurrentMotionInfo(): MotionInfo | null {
     let info: MotionInfo | null = null;
     const clip = this.currentMotionClip;
     if (isUrdfMotionKind(this.currentMotionKind) && clip) {
@@ -5223,6 +5298,20 @@ export class AppController {
         model: motion.modelSourcePath,
       };
     }
+    return info;
+  }
+
+  private syncMotionInfo(): void {
+    if (!this.hasAnyMotion()) {
+      this.motionInfoDialog.close();
+      this.motionInfoDetails.replaceChildren();
+      this.motionInfoWarnings.replaceChildren();
+      this.motionInfoSignature = '';
+      return;
+    }
+    if (!this.motionInfoDialog.open) return;
+
+    const info = this.getCurrentMotionInfo();
     if (!info) return;
 
     const rows = buildMotionInfoRows(info);
@@ -5498,6 +5587,10 @@ export class AppController {
   }
 
   private async loadCapturedObjByMapPath(mapPath: string): Promise<void> {
+    await this.runImportCheck(mapPath, () => this.performLoadCapturedObjByMapPath(mapPath));
+  }
+
+  private async performLoadCapturedObjByMapPath(mapPath: string): Promise<void> {
     const normalizedPath = normalizePath(mapPath);
     if (!normalizedPath) {
       return;
@@ -5550,6 +5643,10 @@ export class AppController {
   }
 
   private async loadPresetById(presetId: string): Promise<void> {
+    await this.runImportCheck(presetId, () => this.performLoadPresetById(presetId));
+  }
+
+  private async performLoadPresetById(presetId: string): Promise<void> {
     const preset = this.getPresetById(presetId);
     if (!preset) {
       this.setState('error', {
