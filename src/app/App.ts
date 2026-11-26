@@ -2644,7 +2644,7 @@ export class AppController {
             console.log(`Failed to load ${path} as MimicKit, trying GMR:`, mimicKitError);
             try {
               this.setState('loading', {
-                detail: 'Loading GMR motion PKL ...',
+                detail: 'Loading GMR PKL ...',
               });
               const result = await this.gmrMotionService.loadFromDroppedFiles(
                 fileMap,
@@ -2983,14 +2983,14 @@ export class AppController {
     if (!loadedRobotResult) {
       this.showRecoverableDropError(
         'URDF Required For GMR',
-        'Load a URDF robot first, then drop GMR motion PKL.',
-        'GMR motion-only drop needs an active URDF robot. Drop URDF first, then GMR PKL.',
+        'Load a URDF robot first, then drop GMR PKL.',
+        'GMR motion-only drop needs an active URDF robot. Drop URDF first, then PKL.',
       );
       return;
     }
 
     this.setState('loading', {
-      detail: 'Loading GMR motion PKL ...',
+      detail: 'Loading GMR PKL ...',
     });
 
     try {

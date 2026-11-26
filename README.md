@@ -111,6 +111,12 @@ python3 tools/convert_omomo_seq_to_motion_npz.py \
 - Follow [GMR](https://github.com/YanjieZe/GMR.git) readme to get motion data.
 - Drag and drop any GMR motion file (.pkl).
 
+### GMR PKL compatibility
+- MonkeySunIP-style robot motion PKL files use the existing GMR import and playback pipeline. The UI shows **GMR**.
+- Required fields: `fps`, `root_pos [T, 3]`, `root_rot [T, 4]`, and `dof_pos [T, J]`. Both older NumPy ndarray and protocol 5 `_frombuffer` encodings are supported. `local_body_pos` and `link_body_list` may be `None`.
+- Load the matching URDF before dropping the PKL. The `tak_002_1_Skeleton0dex_evt2_Refined_Denoised.pkl` sample has 120 FPS, 1017 frames, and 31 DOF. Inspect it with `assets/robots/EVT2/urdf/tiangong2dex_31dof.urdf` and its meshes.
+- Existing GMR conventions apply: XYZW root quaternions, translation in meters, and joint angles in radians. The sample has no joint names or unit metadata; import uses the active URDF joint order and warns that it needs verification. Exports use the existing GMR and other conversion options.
+
 ### Preset
 - `dance1_subject1.bvh` bvh from [LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset/blob/master/lafan1/lafan1.zip).
 - `g1`,`h1`,`h1_2` urdf and corrospnd `dance1_subject1.csv` from [Unitree-LAFAN1-Retargeting](https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset).

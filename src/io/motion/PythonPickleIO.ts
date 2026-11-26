@@ -479,10 +479,19 @@ function parseNdarrayFromPickleparser(value: unknown, label: string): SmplTensor
     throw new Error(`${label} is not a numpy ndarray in Python pickle.`);
   }
 
-  const shapeRaw = value['1'];
-  const dtypeRaw = value['2'];
-  const fortranRaw = value['3'];
-  const dataRaw = value['4'];
+  // NumPy protocol 5 uses _frombuffer(data, dtype, shape, order) instead
+  // of the older ndarray BUILD state. Both encode the same numeric arrays.
+  const fromBuffer = value.__name__ === '_frombuffer' &&
+    (value.__module__ === 'numpy.core.numeric' || value.__module__ === 'numpy._core.numeric');
+  const args = fromBuffer && Array.isArray(value.args) ? value.args : [];
+  const shapeRaw = fromBuffer ? args[2] : value['1'];
+  const dtypeRaw = fromBuffer ? args[1] : value['2'];
+  const fortranRaw = fromBuffer ? args[3] === 'F' : value['3'];
+  const dataRaw = fromBuffer ? args[0] : value['4'];
+
+  if (fromBuffer && args[3] !== 'C' && args[3] !== 'F') {
+    throw new Error(`Unsupported NumPy _frombuffer order for ${label}: ${args[3]}.`);
+  }
 
   if (!Array.isArray(shapeRaw) || dtypeRaw === undefined || dataRaw === undefined) {
     throw new Error(`${label} is not a numpy ndarray in Python pickle.`);

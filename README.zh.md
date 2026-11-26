@@ -119,6 +119,12 @@ python3 tools/convert_omomo_seq_to_motion_npz.py \
 - 按照 [GMR](https://github.com/YanjieZe/GMR.git) 的 README 获取动作数据。
 - 将任意 GMR 动作文件（`.pkl`）拖入页面。
 
+### GMR PKL 兼容说明
+- MonkeySunIP 这类机器人动作 PKL 使用 GMR 导入与播放流程，界面统一显示为 **GMR**。
+- 必需字段：`fps`、`root_pos [T, 3]`、`root_rot [T, 4]`、`dof_pos [T, J]`。支持旧版 NumPy ndarray 和 protocol 5 `_frombuffer` 编码；`local_body_pos`、`link_body_list` 可以为 `None`。
+- 先加载匹配的 URDF，再拖入动作 PKL。`tak_002_1_Skeleton0dex_evt2_Refined_Denoised.pkl` 为 120 FPS、1017 帧、31 DOF，可使用 `assets/robots/EVT2/urdf/tiangong2dex_31dof.urdf` 及其网格资源进行检查。
+- 按现有 GMR 约定解释根旋转（XYZW）、平移（米）、关节角（弧度）。该文件没有关节名称或单位元数据，默认采用当前 URDF 的关节顺序，并显示警告；仍需核对实际动作。导出沿用现有 GMR 等格式选项。
+
 ### 预设
 - `dance1_subject1.bvh` BVH 文件来自 [LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset/blob/master/lafan1/lafan1.zip)。
 - `g1`、`h1`、`h1_2` 的 URDF 以及对应的 `dance1_subject1.csv` 来自 [Unitree-LAFAN1-Retargeting](https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset)。
